@@ -6,6 +6,7 @@
   :depends-on (:cffi)
   :components
   ((:file "package")
+   (:file "base-types")
    (:cffi-grovel-file "grovel")
    (:file "cl-opencl-cffi")
    (:file "cl-opencl")))

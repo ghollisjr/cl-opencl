@@ -1,22 +1,24 @@
 (pkg-config-cflags "OpenCL" :optional t)
+;; (include "CL/cl_version.h")
+;; (include "CL/cl_platform.h")
 (include "CL/cl.h")
 
 (in-package #:cl-opencl-cffi)
 
 ;; basic types
 (ctype size-t "size_t")
-(progn
-  (ctype cl-char "cl_char")
-  (ctype cl-uchar "cl_uchar")
-  (ctype cl-short "cl_short")
-  (ctype cl-ushort "cl_ushort")
-  (ctype cl-int "cl_int")
-  (ctype cl-uint "cl_uint")
-  (ctype cl-long "cl_long")
-  (ctype cl-ulong "cl_ulong")
-  (ctype cl-half "cl_half")
-  (ctype cl-float "cl_float")
-  (ctype cl-double "cl_double"))
+;; (progn
+;;   (ctype cl-char "cl_char")
+;;   (ctype cl-uchar "cl_uchar")
+;;   (ctype cl-short "cl_short")
+;;   (ctype cl-ushort "cl_ushort")
+;;   (ctype cl-int "cl_int")
+;;   (ctype cl-uint "cl_uint")
+;;   (ctype cl-long "cl_long")
+;;   (ctype cl-ulong "cl_ulong")
+(ctype cl-half "cl_half")
+;;   (ctype cl-float "cl_float")
+;;   (ctype cl-double "cl_double"))
 
 (progn
   (ctype cl-platform-id "cl_platform_id")
