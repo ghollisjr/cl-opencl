@@ -835,7 +835,6 @@
 
 ;;; CL/cl_ext.h
 
-
 (progn
   (constant (+CL-DEVICE-DOUBLE-FP-CONFIG+ "CL_DEVICE_DOUBLE_FP_CONFIG"))
   (constant (+CL-DEVICE-HALF-FP-CONFIG+ "CL_DEVICE_HALF_FP_CONFIG"))
