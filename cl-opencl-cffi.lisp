@@ -83,11 +83,7 @@
   (context cl-context))
 
 (defcfun "clReleaseContext" cl-int
-  (context cl-context)
-  (param-name cl-context-info)
-  (param-value-size size-t)
-  (param-value :pointer)
-  (param-value-size-ret :pointer))
+  (context cl-context))
 
 ;; Command Queue APIs
 (defcfun "clCreateCommandQueueWithProperties"
