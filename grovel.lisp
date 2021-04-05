@@ -102,23 +102,24 @@
 
 ;; images
 (cstruct cl-image-format "cl_image_format"
-         (image-channel-order "image_channel_order" :type cl-channel-order)
-         (image-channel-data-type "image_channel_data_type" :type cl-channel-type))
+         (:image-channel-order "image_channel_order" :type cl-channel-order)
+         (:image-channel-data-type "image_channel_data_type" :type cl-channel-type))
 
 (cstruct cl-image-desc "cl_image_desc"
-         (image-type "image_type" :type cl-mem-object-type)
-         (image-width "image_width" :type size-t)
-         (image-height "image_height" :type size-t)
-         (image-depth "image_depth" :type size-t)
-         (image-array-size "image_array_size" :type size-t)
-         (image-row-pitch "image_row_pitch" :type size-t)
-         (image-slice-pitch "image_slice_pitch" :type size-t)
-         (num-mip-levels "num_mip_levels" :type cl-uint)
-         (num-samples "num_samples" :type cl-uint))
+         (:image-type "image_type" :type cl-mem-object-type)
+         (:image-width "image_width" :type size-t)
+         (:image-height "image_height" :type size-t)
+         (:image-depth "image_depth" :type size-t)
+         (:image-array-size "image_array_size" :type size-t)
+         (:image-row-pitch "image_row_pitch" :type size-t)
+         (:image-slice-pitch "image_slice_pitch" :type size-t)
+         (:num-mip-levels "num_mip_levels" :type cl-uint)
+         (:num-samples "num_samples" :type cl-uint)
+         (:buffer "buffer" :type cl-mem))
 
 (cstruct cl-buffer-region "cl_buffer_region"
-         (origin "origin" :type size-t)
-         (size "size" :type size-t))
+         (:origin "origin" :type size-t)
+         (:size "size" :type size-t))
 
 ;; experimental
 ;; (progn
@@ -998,30 +999,30 @@
        "cl_device_svm_capabilities_arm")
 
 (cstruct cl-mem-ext-host-ptr "cl_mem_ext_host_ptr"
-         (allocation-type "allocation_type"
-                          :type cl-uint)
-         (host-cache-policy "host_cache_policy"
-                            :type cl-uint))
+         (:allocation-type "allocation_type"
+                           :type cl-uint)
+         (:host-cache-policy "host_cache_policy"
+                             :type cl-uint))
 
 (cstruct cl-mem-ion-host-ptr "cl_mem_ion_host_ptr"
-         (ext-host-ptr "ext_host_ptr"
-                       :type cl-mem-ext-host-ptr)
-         (ion-filedesc "ion_filedesc"
-                       :type :int)
-         (ion-hostptr "ion_hostptr"
-                      :type :pointer))
+         (:ext-host-ptr "ext_host_ptr"
+                        :type cl-mem-ext-host-ptr)
+         (:ion-filedesc "ion_filedesc"
+                        :type :int)
+         (:ion-hostptr "ion_hostptr"
+                       :type :pointer))
 
 (cstruct cl-mem-android-native-buffer-host-ptr
          "cl_mem_android_native_buffer_host_ptr"
-         (ext-host-ptr "ext_host_ptr"
-                       :type cl-mem-ext-host-ptr)
-         (anb-ptr "anb_ptr"
-                  :type :pointer))
+         (:ext-host-ptr "ext_host_ptr"
+                        :type cl-mem-ext-host-ptr)
+         (:anb-ptr "anb_ptr"
+                   :type :pointer))
 
 (cstruct cl-name-version-khr
          "cl_name_version_khr"
-         (version "version"
-                  :type cl-version-khr)
-         (name "name"
-               :type :char
-               :count "CL_NAME_VERSION_MAX_NAME_SIZE_KHR"))
+         (:version "version"
+                   :type cl-version-khr)
+         (:name "name"
+                :type :char
+                :count "CL_NAME_VERSION_MAX_NAME_SIZE_KHR"))
