@@ -799,7 +799,7 @@
    :clSetMemObjectDestructorCallback
    :clSVMAlloc
    :clSVMFree
-   :clCreateSamplerWithiProperties
+   :clCreateSamplerWithProperties
    :clRetainSampler
    :clReleaseSampler
    :clGetSamplerInfo

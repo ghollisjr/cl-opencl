@@ -818,20 +818,275 @@ integer."
     (clSetMemObjectDestructorCallback obj callback user-data)))
 
 ;; SVM Allocation API
+(defun cl-svm-alloc (context flags size
+                     &key (alignment 0))
+  "Returns SVM pointer on success.  Note that there is no error status
+returned by OpenCL for clSVMAlloc, so neither is there any error
+management in this API."
+  (clSVMAlloc context
+              (join-flags flags)
+              size
+              alignment))
 
+(defun cl-svm-free (context svm-pointer)
+  "Frees SVM pointer on success.  Note that there is no error status
+returned by OpenCL for clSVMFree, so neither is there any error
+management in this API."
+  (clSVMFree context svm-pointer))
+
+;; Sampler APIs
+(defun cl-create-sampler (context
+                          &key
+                            (sampler-normalized-coords
+                             +CL-TRUE+)
+                            (sampler-addressing-mode
+                             +CL-ADDRESS-CLAMP+)
+                            (sampler-filter-mode
+                             +CL-FILTER-NEAREST+)
+                            ;; extensions
+                            sampler-mip-filter-mode-khr
+                            sampler-lod-min-khr
+                            sampler-lod-max-khr)
+  "Creates sampler with given settings.  NOTE: At the time of writing,
+the headers on my system did not have the CL_FILTER_NEAREST_KHR
+constant defined, which is the default value for the
+CL_SAMPLER_MIP_FILTER_MODE_KHR property.  It's not included in the
+groveler file for this reason."
+  (let* ((proplist
+          ;; will be reversed later
+          (reverse
+           (list +CL-SAMPLER-NORMALIZED-COORDS+
+                 sampler-normalized-coords
+                 +CL-SAMPLER-ADDRESSING-MODE+
+                 sampler-addressing-mode
+                 +CL-SAMPLER-FILTER-MODE+
+                 sampler-filter-mode))))
+    (when sampler-mip-filter-mode-khr
+      (push +CL-SAMPLER-MIP-FILTER-MODE-KHR+
+            proplist)
+      (push sampler-mip-filter-mode-khr
+            proplist))
+    (when sampler-lod-min-khr
+      (push +CL-SAMPLER-LOD-MIN-KHR+
+            proplist)
+      (push sampler-lod-min-khr
+            proplist))
+    (when sampler-lod-max-khr
+      (push +CL-SAMPLER-LOD-MAX-KHR+
+            proplist)
+      (push sampler-lod-max-khr
+            proplist))
+    (setf proplist (reverse proplist))
+    (let* ((nprops (length proplist)))
+      (with-foreign-object (props 'cl-sampler-properties
+                                  nprops)
+        (loop
+           for p in proplist
+           for i from 0
+           do (setf (mem-aref props 'cl-sampler-properties i)
+                    p))
+        (setf (mem-aref props 'cl-sampler-properties nprops)
+              0)
+        (check-opencl-error err
+          (clCreateSamplerWithProperties context
+                                         props
+                                         err))))))
+
+(defun cl-retain-sampler (sampler)
+  (check-opencl-error ()
+    (clRetainSampler sampler)))
+
+(defun cl-release-sampler (sampler)
+  (check-opencl-error ()
+    (clReleaseSampler sampler)))
+
+(defun cl-get-sampler-info (sampler param)
+  (with-foreign-object (retsize 'size-t)
+    (check-opencl-error ()
+      (clGetSamplerInfo sampler param 0 +NULL+ retsize))
+    (let* ((rettype
+            (cond
+              ((= param +CL-SAMPLER-REFERENCE-COUNT+)
+               'cl-uint)
+              ((= param +CL-SAMPLER-CONTEXT+)
+               'cl-context)
+              ((= param +CL-SAMPLER-ADDRESSING-MODE+)
+               'cl-addressing-mode)
+              ((= param +CL-SAMPLER-FILTER-MODE+)
+               'cl-filter-mode)
+              ((= param +CL-SAMPLER-NORMALIZED-COORDS+)
+               'cl-bool))))
+      (with-foreign-object (retval :char (mem-ref retsize 'size-t))
+        (check-opencl-error ()
+          (clGetSamplerInfo sampler param
+                            (mem-ref retsize 'size-t)
+                            retval
+                            +NULL+))
+        (mem-ref retval rettype)))))
 
 ;; Program API
-(defun cl-create-program-with-source (context kernel-source)
-  (check-opencl-error err
-    (with-foreign-string (source kernel-source)
-      (with-foreign-object (ptr :pointer)
-        (setf (mem-aref ptr :pointer)
-              source)
-        (clCreateProgramWithSource context
-                                   1
-                                   ptr
-                                   +NULL+
-                                   err)))))
+(defun cl-create-program-with-source (context source)
+  "Creates program using source.  source may either be a string or a
+list of source strings."
+  (let* ((sources (if (listp source)
+                      source
+                      (list source)))
+         (nsources (length sources))
+         (strings (loop
+                     for source in sources
+                     collecting
+                       (foreign-string-alloc source))))
+    (with-foreign-object (strings-ptr :pointer nsources)
+      (loop
+         for i below nsources
+         for s in strings
+         do (setf (mem-aref strings-ptr :pointer i)
+                  s))
+      (let* ((result
+              (check-opencl-error err
+                (clCreateProgramWithSource context
+                                           1
+                                           strings-ptr
+                                           +NULL+
+                                           err))))
+        (loop for s in strings
+           do (foreign-free s))
+        result))))
+
+;; Utility for reading binary data from file into Lisp array
+(defun read-binary-data-from-pathname (pathname)
+  "Reads binary data from file located at pathname and returns an
+array of (unsigned-byte 8) data suitable for use with the OpenCL
+high-level API binary data functions,
+e.g. cl-create-program-with-binary."
+  (with-open-file (file pathname
+                        :direction :input
+                        :element-type '(unsigned-byte 8))
+    (let* ((len (file-length file))
+           (result (make-array len :element-type '(unsigned-byte 8))))
+      (read-sequence result file)
+      result)))
+
+;; Utility for writing binary data from a Lisp array into a file
+(defun write-binary-data-to-pathname
+    (data pathname
+     &key
+       (if-exists nil if-exists-p)
+       (if-does-not-exist nil if-does-not-exist-p))
+  "Writes binary data to file located at pathname from an array
+of (unsigned-byte 8) data suitable for use with the OpenCL high-level
+API binary data functions."
+  (let* ((file (apply #'open pathname
+                      :direction :output
+                      :element-type '(unsigned-byte 8)
+                      (append
+                       (when if-exists-p
+                         (list :if-exists if-exists))
+                       (when if-does-not-exist-p
+                         (list :if-does-not-exist if-does-not-exist))))))
+    (write-sequence data file)
+    (close file)))
+
+(defun cl-create-program-with-binary (context devices binary-arrays)
+  "Creates a program given a list of devices and a list of binary data
+arrays, one binary data array per supplied device.  Each array should
+contain integer elements between the values 0 and 255 inclusively to
+denote bytes of data.  A type of (UNSIGNED-BYTE 8) is recommended for
+the array element type to optimize storage.  Data located in files can
+be loaded with read-binary-data-from-pathname."
+  (let* ((lengths (mapcar #'length binary-arrays))
+         (ndevs (length devices)))
+    (with-foreign-objects ((devs 'cl-device-id ndevs)
+                           (binaries-ptr :pointer ndevs)
+                           (len-ptr 'size-t ndevs))
+      (loop
+         for dev in devices
+         for len in lengths
+         for i from 0
+         do
+           (setf (mem-aref devs 'cl-device-id i)
+                 dev)
+           (setf (mem-aref len-ptr 'size-t i)
+                 len))
+      (let* ((binaries
+              (loop
+                 for len in lengths
+                 collecting (foreign-alloc :uchar :count len))))
+        (loop
+           for i below ndevs
+           for bin in binaries
+           do (setf (mem-aref binaries-ptr :pointer i)
+                    bin))
+        (loop
+           for bin in binaries
+           for len in lengths
+           for arr in binary-arrays
+           do (loop
+                 for i below len
+                 do (setf (mem-aref bin :uchar i)
+                          (aref arr i))))
+        (let* ((retval
+                (check-opencl-error err
+                  (clCreateProgramWithBinary context
+                                             ndevs
+                                             devs
+                                             len-ptr
+                                             binaries-ptr
+                                             +NULL+ ; might use this eventually
+                                             err))))
+          (loop
+             for bin in binaries
+             do (foreign-free bin))
+          retval)))))
+
+(defun cl-create-program-with-built-in-kernels
+    (context devices kernels)
+  "Creates program from built-in kernel names.  devices is a list of
+cl-device-id device handles, and kernels is either a list of Lisp
+strings or a single string of semicolon-separated names denoting the
+kernel names to include in the program.  Note that all kernels must be
+defined in all devices for this to succeed."
+  (let* ((ndevs (length devices))
+         (kernstr
+          (if (stringp kernels)
+              kernels
+              (reduce (lambda (x y)
+                        (concatenate 'string
+                                     x
+                                     ";"
+                                     y))
+                      kernels))))
+    (with-foreign-object (devs 'cl-device-id ndevs)
+      (loop
+         for d in devices
+         for i from 0
+         do (setf (mem-aref devs 'cl-device-id i)
+                  d))
+      (with-foreign-string (kernstr-ptr kernstr)
+        (check-opencl-error err
+          (clCreateProgramWithBuiltInKernels context
+                                             ndevs
+                                             devs
+                                             kernstr
+                                             err))))))
+
+(defun cl-create-program-with-il (context il)
+  "Creates program from intermediate language binary data.  il should
+be an array where the elements denote bytes, so (unsigned-byte 8) is
+the recommended element type. read-binary-data-from-pathname is
+available to load binary data stored in a file into such an array."
+  (let* ((nbytes (length il)))
+    (with-foreign-object (data :uchar nbytes)
+      (loop
+         for i below nbytes
+         for d in il
+         do (setf (mem-aref data :uchar i)
+                  d))
+      (check-opencl-error err
+        (clCreateProgramWithIL context
+                               il
+                               nbytes
+                               err)))))
 
 (defun cl-release-program (program)
   (check-opencl-error ()
@@ -869,6 +1124,241 @@ supplied as an argument as per usual CFFI usage."
       (check-opencl-error ()
         (clBuildProgram program ndevices devs opts cb data)))))
 
+(defun cl-compile-program (program devices
+                           &key
+                             options
+                             header-programs
+                             header-names
+                             callback
+                             user-data)
+  "Compiles a program according to options for each of the devices
+listed.  If header-programs is supplied, then header-names needs to
+contain the names of each of the header-programs as referred to in the
+program source code.  When supplied, user-data should be a foreign
+pointer to data used by the callback function, which should be defined
+using cffi:defcallback."
+  (let* ((ndevs (length devices))
+         (opt-ptr +NULL+)
+         (nheaders 0)
+         (hp-ptr +NULL+)
+         (hn-ptr +NULL+)
+         (cb-ptr +NULL+)
+         (ud-ptr +NULL+))
+    (with-foreign-object (devs 'cl-device-id ndevs)
+      (loop
+         for d in devices
+         for i from 0
+         do (setf (mem-aref devs 'cl-device-id i)
+                  d))
+      (when callback
+        (setf cb-ptr callback))
+      (when user-data
+        (setf ud-ptr user-data))
+      (labels ((init-headers ()
+                 (when header-programs
+                   (setf nheaders
+                         (length header-programs))
+                   (setf hp-ptr
+                         (foreign-alloc 'cl-program :count nheaders))
+                   (loop
+                      for i below nheaders
+                      for hp in header-programs
+                      do (setf (mem-aref hp-ptr 'cl-program i)
+                               hp))
+                   (setf hn-ptr
+                         (foreign-alloc :pointer :count nheaders))
+                   (loop
+                      for i below nheaders
+                      for hn in header-names
+                      do (setf (mem-aref hn-ptr :pointer i)
+                               (foreign-string-alloc hn)))))
+               (clean-headers ()
+                 (when header-programs
+                   (foreign-free hp-ptr)
+                   (loop
+                      for i below nheaders
+                      do (foreign-free (mem-aref hn-ptr :pointer i)))
+                   (foreign-free hn-ptr)))
+               (init-options ()
+                 (when options
+                   (setf opt-ptr
+                         (foreign-string-alloc options))))
+               (clean-options ()
+                 (when options
+                   (foreign-free opt-ptr)))
+               (init ()
+                 (init-options)
+                 (init-headers))
+               (cleanup ()
+                 (clean-headers)
+                 (clean-options)))
+        (init)
+        (check-opencl-error ()
+          (clCompileProgram program ndevs devs
+                            opt-ptr
+                            nheaders
+                            hp-ptr
+                            hn-ptr
+                            cb-ptr
+                            ud-ptr))
+        (cleanup)))))
+
+(defun cl-link-program (context programs devices
+                        &key
+                          options
+                          callback
+                          user-data)
+  "Links programs into executables for devices.  programs must be a
+list of programs to include in the executable.  callback can be a
+cffi:defcallback return value, and user-data can be a foreign pointer
+to data supplied to that callback."
+  (let* ((ndevs (length devices))
+         (ninputs 0)
+         (opt-ptr +NULL+)
+         (ip-ptr +NULL+)
+         (cb-ptr +NULL+)
+         (ud-ptr +NULL+))
+    (with-foreign-object (devs 'cl-device-id ndevs)
+      (when callback
+        (setf cb-ptr callback))
+      (when user-data
+        (setf ud-ptr user-data))
+      (labels ((init ()
+                 (setf ninputs (length programs))
+                 (setf ip-ptr (foreign-alloc 'cl-program :count ninputs))
+                 (loop
+                    for ip in programs
+                    for i from 0
+                    do (setf (mem-aref ip-ptr 'cl-program i)
+                             ip))
+                 (when options
+                   (setf opt-ptr (foreign-string-alloc options))))
+               (cleanup ()
+                 (foreign-free ip-ptr)
+                 (when options
+                   (foreign-free opt-ptr))))
+        (init)
+        (check-opencl-error err
+          (clLinkProgram context ndevs devs
+                         opt-ptr
+                         ninputs
+                         ip-ptr
+                         cb-ptr
+                         ud-ptr
+                         err))
+        (cleanup)))))
+
+(defun cl-set-program-release-callback (program callback
+                                        &key
+                                          (user-data +NULL+))
+  "Sets release callback for program.  callback must be a return value
+of cffi:defcallback.  user-data can be a pointer to foreign data given
+to the callback."
+  (check-opencl-error ()
+    (clSetProgramReleaseCallback program callback user-data)))
+
+;; Note: cl-set-program-specialization-constant would be defined, but
+;; I can't find sufficient documentation to create a Lisp version.
+;; You can still call this from the CFFI lower level API as
+;; clSetProgramSpecializationConstant.
+
+(defun cl-unload-platform-compiler (platform)
+  (check-opencl-error ()
+    (clUnloadPlatformCompiler platform)))
+
+(defun cl-get-program-info (program param)
+  "Get program info from parameters.  NOTE: +CL-PROGRAM-BINARIES+
+triggers an error message referring to the helper function needed for
+extracting binaries."
+  (when (= param +CL-PROGRAM-BINARIES+)
+    (error "Use cl-get-program-binaries to extract binaries from a program."))
+  (with-foreign-object (retsize 'size-t)
+    (check-opencl-error ()
+      (clGetProgramInfo program param 0 +NULL+ retsize))
+    (print (mem-ref retsize 'size-t))
+    (with-foreign-object (retval :char (mem-ref retsize 'size-t))
+      (check-opencl-error ()
+        (clGetProgramInfo program param (mem-ref retsize 'size-t)
+                          retval
+                          +NULL+))
+      (cond
+        ((= param +CL-PROGRAM-REFERENCE-COUNT+)
+         (mem-ref retval 'cl-uint))
+        ((= param +CL-PROGRAM-CONTEXT+)
+         (mem-ref retval 'cl-context))
+        ((= param +CL-PROGRAM-NUM-DEVICES+)
+         (mem-ref retval 'cl-uint))
+        ((= param +CL-PROGRAM-DEVICES+)
+         (let* ((ndevices (floor (mem-aref retsize 'size-t)
+                                 (foreign-type-size 'cl-device-id))))
+           (loop
+              for i below ndevices
+              collecting (mem-aref retval 'cl-device-id i))))
+        ((= param +CL-PROGRAM-SOURCE+)
+         (foreign-string-to-lisp retval))
+        ((= param +CL-PROGRAM-BINARY-SIZES+)
+         (let* ((nbinaries (floor (mem-aref retsize 'size-t)
+                                  (foreign-type-size 'size-t))))
+           (loop
+              for i below nbinaries
+              collecting (mem-aref retval 'size-t i))))
+        ((= param +CL-PROGRAM-NUM-KERNELS+)
+         (mem-ref retval 'size-t))
+        ((= param +CL-PROGRAM-KERNEL-NAMES+)
+         (foreign-string-to-lisp retval))))))
+
+(defun cl-get-program-binaries (program)
+  "Convenience function returning list of binary data arrays for the
+binaries of a program.  Wrapper around necessary calls to
+cl-get-program-info and foreign memory management."
+  (let* ((binary-sizes
+          (cl-get-program-info program +CL-PROGRAM-BINARY-SIZES+))
+         (nbinaries (length binary-sizes))
+         (binary-buffers
+          (loop
+             for size in binary-sizes
+             collecting (foreign-alloc :uchar :count size))))
+    (with-foreign-object (binbuf-ptr :pointer nbinaries)
+      (loop
+         for buf in binary-buffers
+         for i from 0
+         do (setf (mem-aref binbuf-ptr :pointer i)
+                  buf))
+      (with-foreign-object (retsize 'size-t)
+        (check-opencl-error ()
+          (clGetProgramInfo program +CL-PROGRAM-BINARIES+
+                            0 +NULL+ retsize))
+        (check-opencl-error ()
+          (clGetProgramInfo program +CL-PROGRAM-BINARIES+
+                            (mem-ref retsize 'size-t)
+                            binbuf-ptr
+                            +NULL+))
+        (loop
+           for i below nbinaries
+           for size in binary-sizes
+           collecting (foreign-array-to-lisp
+                       (mem-aref binbuf-ptr :pointer i)
+                       (list :array :uchar size)
+                       :element-type '(unsigned-byte 8)))))))
+
+(defun cl-get-program-build-info (program device param)
+  (with-foreign-object (retsize 'size-t)
+    (check-opencl-error ()
+      (clGetProgramBuildInfo program device param
+                             0 +NULL+ retsize))
+    (with-foreign-object (retval :uchar (mem-ref retsize 'size-t))
+      (check-opencl-error ()
+        (clGetProgramBuildInfo program device param
+                               (mem-ref retsize 'size-t)
+                               retval +NULL+))
+      (cond
+        ((= param +CL-PROGRAM-BUILD-STATUS+)
+         (mem-ref retval 'cl-build-status))
+        ((= param +CL-PROGRAM-BUILD-OPTIONS+)
+         (foreign-string-to-lisp retval))
+        ((= param +CL-PROGRAM-BUILD-LOG+)
+         (foreign-string-to-lisp retval))))))
+      
 ;; Kernel API
 (defun cl-create-kernel (program name)
   (check-opencl-error err

@@ -1,3 +1,4 @@
 - CFFI
 + High level interface:
-  + Continue at line 821 of cl-opencl.lisp for SVM allocation API
+  - Continue at line 821 of cl-opencl.lisp for SVM allocation API
+  + Continue at line 1363 of cl-opencl.lisp for kernel API

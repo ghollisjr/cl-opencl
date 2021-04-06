@@ -206,7 +206,7 @@
   (svm-pointer :pointer))
 
 ;; Sampler APIs
-(defcfun "clCreateSamplerWithiProperties" cl-sampler
+(defcfun "clCreateSamplerWithProperties" cl-sampler
   (context cl-context)
   (sampler-properties :pointer)
   (errcode-ret :pointer))
