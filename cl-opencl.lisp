@@ -1365,6 +1365,92 @@ cl-get-program-info and foreign memory management."
     (with-foreign-string (sname name)
       (clCreateKernel program sname err))))
 
+(defun cl-create-kernels-in-program (program)
+  (with-foreign-object (retsize 'size-t)
+    (check-opencl-error ()
+      (clCreateKernelsInProgram program 0 +NULL+ retsize))
+    (with-foreign-object (kernels 'cl-kernel (mem-ref retsize 'size-t))
+      (check-opencl-error ()
+        (clCreateKernelsInProgram program (mem-ref retsize 'size-t)
+                                  kernels +NULL+))
+      (loop
+         for i below (mem-ref retsize 'size-t)
+         collecting (mem-aref kernels 'cl-kernel i)))))
+
+(defun cl-clone-kernel (kernel)
+  (check-opencl-error err
+    (clCloneKernel kernel err)))
+
+(defun cl-retain-kernel (kernel)
+  (check-opencl-error ()
+    (clRetainKernel kernel)))
+
+(defun cl-release-kernel (kernel)
+  (check-opencl-error ()
+    (clReleaseKernel kernel)))
+
+(defun cl-set-kernel-arg (kernel index
+                          &key
+                            value
+                            (type 'cl-mem)
+                            (count 1)
+                            size)
+  "Sets kernel argument.  If value is NIL, local memory will be
+supplied to the kernel.  Otherwise, the value will be assumed to be of
+foreign type.  Size is determined by the type and count unless size is
+explicitly specified."
+  (when (not (or value size))
+    (error "Must set value or size in cl-set-kernel-arg"))
+  (let* ((size (if size
+                   size
+                   (* count (foreign-type-size type)))))
+    (if value
+        (with-foreign-object (f type)
+          (setf (mem-ref f type)
+                value)
+          (check-opencl-error ()
+            (clSetKernelArg kernel index size f)))
+        (check-opencl-error ()
+          (clSetKernelArg kernel index size +NULL+)))))
+
+(defun cl-set-kernel-arg-svm-pointer (kernel index value)
+  (check-opencl-error ()
+    (clSetKernelArgSVMPointer kernel index value)))
+
+(defun cl-set-kernel-exec-info (kernel
+                                &key
+                                  svm-pointers
+                                  fine-grain-system)
+  "Adjusts kernel execution settings.  svm-pointers can be a list of
+SVM foreign pointer objects.  fine-grain-system can be either
++CL-TRUE+ or +CL-FALSE+, but the default depends on the system.  Both
+arguments can be set to adjust both settings simultaneously."
+  (when (not (or svm-pointers fine-grain-system))
+    (error "Must set either svm-pointers or fine-grain-system."))
+  (when svm-pointers
+    (let* ((np (length svm-pointers)))
+      (with-foreign-object (p :pointer np)
+        (loop
+           for sp in svm-pointers
+           for i from 0
+           do (setf (mem-aref p :pointer i)
+                    sp))
+        (check-opencl-error ()
+          (clSetKernelExecInfo kernel +CL-KERNEL-EXEC-INFO-SVM-PTRS+
+                               (* (foreign-type-size :pointer)
+                                  np)
+                               p)))))
+  (when fine-grain-system
+    (with-foreign-object (fgs 'cl-bool)
+      (setf (mem-aref fgs 'cl-bool)
+            fine-grain-system)
+      (check-opencl-error ()
+        (clSetKernelExecInfo kernel +CL-KERNEL-EXEC-INFO-SVM-FINE-GRAIN-SYSTEM+
+                             (foreign-type-size 'cl-bool)
+                             fgs)))))
+
+
+
 (defun cl-get-kernel-work-group-info (kernel device param)
   "Queries kernel for information about running on given device."
   (let* ((type nil)
@@ -1392,25 +1478,3 @@ cl-get-program-info and foreign memory management."
             collecting (mem-aref result 'size-t i)))
         ((= param +CL-KERNEL-LOCAL-MEM-SIZE+)
          (mem-ref result 'cl-uint))))))
-
-(defun cl-set-kernel-arg (kernel index
-                          &key
-                            value
-                            (type 'cl-mem)
-                            (count 1)
-                            size)
-  "Sets kernel argument.  If value is NIL, local memory will be
-supplied to the kernel.  Otherwise, the value will be assumed to be of
-foreign type.  Size is determined by the type and count unless size is
-explicitly specified."
-  (let* ((size (if size
-                   size
-                   (* count (foreign-type-size type)))))
-    (if value
-        (with-foreign-object (f type)
-          (setf (mem-ref f type)
-                value)
-          (check-opencl-error ()
-            (clSetKernelArg kernel index size f)))
-        (check-opencl-error ()
-          (clSetKernelArg kernel index size +NULL+)))))
