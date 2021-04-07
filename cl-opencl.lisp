@@ -1,19 +1,24 @@
 (in-package :cl-opencl)
 
 ;; utility macro
-(defmacro check-opencl-error (err &body body)
+(defmacro check-opencl-error (err cleanup &body body)
   "Macro for automating error management with two modes:
 
 1. NULL err denoting error code will be returned by body.
 
 2. Symbol err-address to denote symbol to use for error address so as
-to interact with OpenCL CFFI functions."
+to interact with OpenCL CFFI functions.
+
+If cleanup is non-NIL, it must be a function called before signaling
+an error.  Useful for preventing memory leaks."
   (cond
     ((null err)
      (let ((err (gensym)))
        `(let* ((,err
                 (progn ,@body)))
           (when (not (= ,err +CL-SUCCESS+))
+            ,@(when cleanup
+                `((funcall ,cleanup)))
             (error "OpenCL Error ~a" ,err))
           ,err)))
     ((symbolp err)
@@ -25,6 +30,8 @@ to interact with OpenCL CFFI functions."
             (let* ((,return-value
                     (progn ,@body)))
               (when (not (= ,err +CL-SUCCESS+))
+                ,@(when cleanup
+                    `((funcall ,cleanup)))
                 (error "OpenCL Error ~a" ,err))
               ,return-value)))))))
 
@@ -34,7 +41,7 @@ to interact with OpenCL CFFI functions."
     (clgetplatformids 0 +NULL+ nplatforms)
     (let* ((nplats (mem-ref nplatforms :uint)))
       (with-foreign-object (platform-ids 'cl-platform-id nplats)
-        (check-opencl-error ()
+        (check-opencl-error () ()
           (clgetplatformids (mem-ref nplatforms :uint)
                             platform-ids
                             +NULL+))
@@ -47,12 +54,12 @@ to interact with OpenCL CFFI functions."
 (defun cl-get-platform-info (platform param)
   "Returns platform information."
   (with-foreign-object (size 'size-t)
-    (check-opencl-error ()
+    (check-opencl-error () ()
       (clGetPlatformInfo platform param
                          0 +NULL+
                          size))
     (with-foreign-object (pp :char (mem-ref size 'size-t))
-      (check-opencl-error ()
+      (check-opencl-error () ()
         (clGetPlatformInfo platform param
                            (mem-ref size 'size-t)
                            pp
@@ -65,7 +72,7 @@ to interact with OpenCL CFFI functions."
     (clgetdeviceids platform-id platform-type 0 +NULL+ ndevices)
     (let* ((nplats (mem-ref ndevices :uint)))
       (with-foreign-object (device-ids 'cl-device-id nplats)
-        (check-opencl-error ()
+        (check-opencl-error () ()
           (clgetdeviceids platform-id
                           platform-type
                           (mem-ref ndevices :uint)
@@ -78,11 +85,11 @@ to interact with OpenCL CFFI functions."
 (defun cl-get-device-info (device param)
   "Returns platform information."
   (with-foreign-object (size 'size-t)
-    (check-opencl-error ()
+    (check-opencl-error () ()
       (clGetDeviceInfo device param
                        0 +NULL+ size))
     (with-foreign-object (p :char (mem-ref size 'size-t))
-      (check-opencl-error ()
+      (check-opencl-error () ()
         (clGetDeviceInfo device param (mem-ref size 'size-t)
                          p +NULL+))
       (cond
@@ -231,12 +238,12 @@ In all cases, a list of device IDs will be returned."
        (setf (mem-aref properties 'cl-uint 2)
              0)
        (with-foreign-object (num-devices-ret 'cl-uint)
-         (check-opencl-error ()
+         (check-opencl-error () ()
            (clCreateSubDevices device properties 0 +NULL+
                                num-devices-ret))
          (with-foreign-object (devices 'cl-device-id
                                        (mem-ref num-devices-ret 'cl-uint))
-           (check-opencl-error ()
+           (check-opencl-error () ()
              (clCreateSubDevices device properties
                                  (mem-ref num-devices-ret 'cl-uint)
                                  devices +NULL+))
@@ -257,14 +264,14 @@ In all cases, a list of device IDs will be returned."
                  0)))
        (with-foreign-object (num-devices-ret 'cl-uint
                                              (length by-counts))
-         (check-opencl-error ()
+         (check-opencl-error () ()
            (clCreateSubDevices device properties
                                0 +NULL+
                                num-devices-ret))
          (with-foreign-object (devices 'cl-device-id
                                        (mem-ref num-devices-ret
                                                 'cl-uint))
-           (check-opencl-error ()
+           (check-opencl-error () ()
              (clCreateSubDevices device properties
                                  (mem-ref num-devices-ret 'cl-uint)
                                  devices
@@ -298,12 +305,12 @@ In all cases, a list of device IDs will be returned."
          (setf (mem-aref properties 'cl-device-affinity-domain 2)
                0)
          (with-foreign-object (num-devices-ret 'cl-uint)
-           (check-opencl-error ()
+           (check-opencl-error () ()
              (clCreateSubDevices device properties 0 +NULL+ num-devices-ret))
            (with-foreign-object (devices 'cl-device-id
                                          (mem-ref num-devices-ret
                                                   'cl-uint))
-             (check-opencl-error ()
+             (check-opencl-error () ()
                (clCreateSubDevices device properties
                                    (mem-ref num-devices-ret
                                             'cl-uint)
@@ -318,22 +325,22 @@ In all cases, a list of device IDs will be returned."
      (error "Must set one of equally, by-couts, or by-affinity"))))
 
 (defun cl-retain-device (device)
-  (check-opencl-error ()
+  (check-opencl-error () ()
     (clRetainDevice device)))
 
 (defun cl-release-device (device)
-  (check-opencl-error ()
+  (check-opencl-error () ()
     (clReleaseDevice device)))
 
 (defun cl-set-default-device-command-queue (context device queue)
-  (check-opencl-error ()
+  (check-opencl-error () ()
     (clSetDefaultDeviceCommandQueue context device queue)))
 
 (defun cl-get-device-and-host-timer (device)
   "Returns list of (device-timestamp host-timestamp)."
   (with-foreign-objects ((devstamp 'cl-ulong)
                          (hoststamp 'cl-ulong))
-    (check-opencl-error ()
+    (check-opencl-error () ()
       (clGetDeviceAndHostTimer device devstamp hoststamp))
     (list (mem-ref devstamp 'cl-ulong)
           (mem-ref hoststamp 'cl-ulong))))
@@ -341,7 +348,7 @@ In all cases, a list of device IDs will be returned."
 (defun cl-get-host-timer (device)
   "Returns timestamp for host."
   (with-foreign-object (hoststamp 'cl-ulong)
-    (check-opencl-error ()
+    (check-opencl-error () ()
       (clGetHostTimer device hoststamp))
     (mem-ref hoststamp 'cl-ulong)))
 
@@ -373,7 +380,7 @@ kept here for future purposes."
       (setf (mem-aref props 'cl-context-properties
                       2)
             0)
-      (check-opencl-error err
+      (check-opencl-error err ()
         (CLCREATECONTEXT props 1 devices-pointer
                          (if callback
                              callback
@@ -401,7 +408,7 @@ ID."
     (setf (mem-aref props 'cl-context-properties
                     2)
           0)
-    (check-opencl-error err
+    (check-opencl-error err ()
       (clCreateContextFromType props device-type
                                (if callback
                                    callback
@@ -412,11 +419,11 @@ ID."
                                err))))
 
 (defun cl-release-context (context)
-  (check-opencl-error ()
+  (check-opencl-error () ()
     (CLRELEASECONTEXT context)))
 
 (defun cl-retain-context (context)
-  (check-opencl-error ()
+  (check-opencl-error () ()
     (CLRETAINCONTEXT context)))
 
 (defmacro with-opencl-context (context platform devices
@@ -442,7 +449,7 @@ with optional properties set.  If queue-size is non-NIL, then the
 properties list.  The properties list should be a list of integer
 constants as parsed by the groveler."
   (if (not (or queue-size properties))
-      (check-opencl-error err
+      (check-opencl-error err ()
         (clCreateCommandQueueWithProperties context device +NULL+ err))
       (let* ((n-total-props (+ (if properties 1 0)
                                (if queue-size 1 0)))
@@ -467,18 +474,18 @@ constants as parsed by the groveler."
                 (setf next-property
                       bitfield)))
             (setf next-property 0))
-          (check-opencl-error err
+          (check-opencl-error err ()
             (clCreateCommandQueueWithProperties context
                                                 device
                                                 properties
                                                 err))))))
 
 (defun cl-retain-command-queue (queue)
-  (check-opencl-error ()
+  (check-opencl-error () ()
     (clRetainCommandQueue queue)))
 
 (defun cl-release-command-queue (queue)
-  (check-opencl-error ()
+  (check-opencl-error () ()
     (clReleaseCommandQueue queue)))
 
 (defun cl-get-command-queue-info (queue param)
@@ -490,7 +497,7 @@ constants as parsed by the groveler."
             ((= param +CL-QUEUE-PROPERTIES+)
              'cl-command-queue-properties))))
     (with-foreign-object (result type)
-      (check-opencl-error ()
+      (check-opencl-error () ()
         (clGetCommandQueueInfo queue param
                                (foreign-type-size type)
                                result
@@ -555,7 +562,7 @@ integer."
     (error "Must set either size or type and data to non-NIL values."))
   (let* ((mode (join-flags flags)))
     (if size
-        (check-opencl-error err
+        (check-opencl-error err ()
           (clCreateBuffer context
                           mode
                           size
@@ -570,7 +577,7 @@ integer."
                for d in data
                do (setf (mem-aref buf type i)
                         d))
-            (check-opencl-error err
+            (check-opencl-error err ()
               (clCreateBuffer context
                               mode
                               size
@@ -587,7 +594,7 @@ integer."
       (setf (foreign-slot-value bufinfo '(:struct cl-buffer-region)
                                 :size)
             size)
-      (check-opencl-error err
+      (check-opencl-error err ()
         (clCreateSubBuffer buffer flags
                            bufcreatetype
                            bufinfo
@@ -692,16 +699,16 @@ integer."
                    for d in data
                    do (setf (mem-aref fdata data-type i)
                             d))
-                (check-opencl-error err
+                (check-opencl-error err ()
                   (clCreateImage context flags format desc
                                  fdata err))))
-            (check-opencl-error err
+            (check-opencl-error err ()
               (clCreateImage context flags format desc
                              +NULL+ err)))))))
 
 (defun cl-create-pipe (context flags packet-size max-packets)
   (let* ((properties +NULL+)) ; as of OpenCL 2.0
-    (check-opencl-error err
+    (check-opencl-error err ()
       (clCreatePipe context
                     (join-flags flags)
                     packet-size
@@ -710,11 +717,11 @@ integer."
                     err))))
 
 (defun cl-release-mem-object (obj)
-  (check-opencl-error ()
+  (check-opencl-error () ()
     (clReleaseMemObject obj)))
 
 (defun cl-retain-mem-object (obj)
-  (check-opencl-error ()
+  (check-opencl-error () ()
     (clRetainMemObject obj)))
 
 (defun cl-get-supported-image-formats (context flags
@@ -723,12 +730,12 @@ integer."
   "Returns list of plists for the supported image formats."
   (let* ((flags (join-flags flags)))
     (with-foreign-object (num-formats 'cl-uint)
-      (check-opencl-error ()
+      (check-opencl-error () ()
         (clGetSupportedImageFormats context flags image-type
                                     0 +NULL+ num-formats))
       (with-foreign-object (formats '(:struct cl-image-format)
                                     (mem-ref num-formats 'cl-uint))
-        (check-opencl-error ()
+        (check-opencl-error () ()
           (clGetSupportedImageFormats context flags image-type
                                       (mem-ref num-formats 'cl-uint)
                                       formats +NULL+))
@@ -740,10 +747,10 @@ integer."
 
 (defun cl-get-mem-object-info (obj param)
   (with-foreign-object (retsize 'size-t)
-    (check-opencl-error ()
+    (check-opencl-error () ()
       (clGetMemObjectInfo obj param 0 +NULL+ retsize))
     (with-foreign-object (retval :char (mem-ref retsize 'size-t))
-      (check-opencl-error ()
+      (check-opencl-error () ()
         (clGetMemObjectInfo obj param (mem-ref retsize 'size-t)
                             retval +NULL+))
       (let* ((rettype
@@ -766,10 +773,10 @@ integer."
 
 (defun cl-get-image-info (image param)
   (with-foreign-object (retsize 'size-t)
-    (check-opencl-error ()
+    (check-opencl-error () ()
       (clGetImageInfo image param 0 +NULL+ retsize))
     (with-foreign-object (retval :char (mem-ref retsize 'size-t))
-      (check-opencl-error ()
+      (check-opencl-error () ()
         (clGetImageInfo image param (mem-ref retsize 'size-t)
                         retval +NULL+))
       (let* ((rettype
@@ -796,10 +803,10 @@ integer."
 
 (defun cl-get-pipe-info (pipe param)
   (with-foreign-object (retsize 'size-t)
-    (check-opencl-error ()
+    (check-opencl-error () ()
       (clGetPipeInfo pipe param 0 +NULL+ retsize))
     (with-foreign-object (retval :char (mem-ref retsize 'size-t))
-      (check-opencl-error ()
+      (check-opencl-error () ()
         (clGetPipeInfo pipe param (mem-ref retsize 'size-t)
                        retval +NULL+))
       (let* ((rettype
@@ -814,7 +821,7 @@ integer."
     (obj callback
      &key
        (user-data +NULL+))
-  (check-opencl-error ()
+  (check-opencl-error () ()
     (clSetMemObjectDestructorCallback obj callback user-data)))
 
 ;; SVM Allocation API
@@ -887,22 +894,22 @@ groveler file for this reason."
                     p))
         (setf (mem-aref props 'cl-sampler-properties nprops)
               0)
-        (check-opencl-error err
+        (check-opencl-error err ()
           (clCreateSamplerWithProperties context
                                          props
                                          err))))))
 
 (defun cl-retain-sampler (sampler)
-  (check-opencl-error ()
+  (check-opencl-error () ()
     (clRetainSampler sampler)))
 
 (defun cl-release-sampler (sampler)
-  (check-opencl-error ()
+  (check-opencl-error () ()
     (clReleaseSampler sampler)))
 
 (defun cl-get-sampler-info (sampler param)
   (with-foreign-object (retsize 'size-t)
-    (check-opencl-error ()
+    (check-opencl-error () ()
       (clGetSamplerInfo sampler param 0 +NULL+ retsize))
     (let* ((rettype
             (cond
@@ -917,7 +924,7 @@ groveler file for this reason."
               ((= param +CL-SAMPLER-NORMALIZED-COORDS+)
                'cl-bool))))
       (with-foreign-object (retval :char (mem-ref retsize 'size-t))
-        (check-opencl-error ()
+        (check-opencl-error () ()
           (clGetSamplerInfo sampler param
                             (mem-ref retsize 'size-t)
                             retval
@@ -943,7 +950,7 @@ list of source strings."
          do (setf (mem-aref strings-ptr :pointer i)
                   s))
       (let* ((result
-              (check-opencl-error err
+              (check-opencl-error err ()
                 (clCreateProgramWithSource context
                                            1
                                            strings-ptr
@@ -1026,7 +1033,7 @@ be loaded with read-binary-data-from-pathname."
                  do (setf (mem-aref bin :uchar i)
                           (aref arr i))))
         (let* ((retval
-                (check-opencl-error err
+                (check-opencl-error err ()
                   (clCreateProgramWithBinary context
                                              ndevs
                                              devs
@@ -1063,7 +1070,7 @@ defined in all devices for this to succeed."
          do (setf (mem-aref devs 'cl-device-id i)
                   d))
       (with-foreign-string (kernstr-ptr kernstr)
-        (check-opencl-error err
+        (check-opencl-error err ()
           (clCreateProgramWithBuiltInKernels context
                                              ndevs
                                              devs
@@ -1082,18 +1089,18 @@ available to load binary data stored in a file into such an array."
          for d in il
          do (setf (mem-aref data :uchar i)
                   d))
-      (check-opencl-error err
+      (check-opencl-error err ()
         (clCreateProgramWithIL context
                                il
                                nbytes
                                err)))))
 
 (defun cl-release-program (program)
-  (check-opencl-error ()
+  (check-opencl-error () ()
     (clReleaseProgram program)))
 
 (defun cl-retain-program (program)
-  (check-opencl-error ()
+  (check-opencl-error () ()
     (clRetainProgram program)))
 
 (defun cl-build-program (program devices
@@ -1121,7 +1128,7 @@ supplied as an argument as per usual CFFI usage."
          for d in devices
          do (setf (mem-aref devs 'CL-DEVICE-ID i)
                   d))
-      (check-opencl-error ()
+      (check-opencl-error () ()
         (clBuildProgram program ndevices devs opts cb data)))))
 
 (defun cl-compile-program (program devices
@@ -1193,7 +1200,7 @@ using cffi:defcallback."
                  (clean-headers)
                  (clean-options)))
         (init)
-        (check-opencl-error ()
+        (check-opencl-error () ()
           (clCompileProgram program ndevs devs
                             opt-ptr
                             nheaders
@@ -1238,7 +1245,7 @@ to data supplied to that callback."
                  (when options
                    (foreign-free opt-ptr))))
         (init)
-        (check-opencl-error err
+        (check-opencl-error err ()
           (clLinkProgram context ndevs devs
                          opt-ptr
                          ninputs
@@ -1254,7 +1261,7 @@ to data supplied to that callback."
   "Sets release callback for program.  callback must be a return value
 of cffi:defcallback.  user-data can be a pointer to foreign data given
 to the callback."
-  (check-opencl-error ()
+  (check-opencl-error () ()
     (clSetProgramReleaseCallback program callback user-data)))
 
 ;; Note: cl-set-program-specialization-constant would be defined, but
@@ -1263,7 +1270,7 @@ to the callback."
 ;; clSetProgramSpecializationConstant.
 
 (defun cl-unload-platform-compiler (platform)
-  (check-opencl-error ()
+  (check-opencl-error () ()
     (clUnloadPlatformCompiler platform)))
 
 (defun cl-get-program-info (program param)
@@ -1273,11 +1280,11 @@ extracting binaries."
   (when (= param +CL-PROGRAM-BINARIES+)
     (error "Use cl-get-program-binaries to extract binaries from a program."))
   (with-foreign-object (retsize 'size-t)
-    (check-opencl-error ()
+    (check-opencl-error () ()
       (clGetProgramInfo program param 0 +NULL+ retsize))
     (print (mem-ref retsize 'size-t))
     (with-foreign-object (retval :char (mem-ref retsize 'size-t))
-      (check-opencl-error ()
+      (check-opencl-error () ()
         (clGetProgramInfo program param (mem-ref retsize 'size-t)
                           retval
                           +NULL+))
@@ -1325,10 +1332,10 @@ cl-get-program-info and foreign memory management."
          do (setf (mem-aref binbuf-ptr :pointer i)
                   buf))
       (with-foreign-object (retsize 'size-t)
-        (check-opencl-error ()
+        (check-opencl-error () ()
           (clGetProgramInfo program +CL-PROGRAM-BINARIES+
                             0 +NULL+ retsize))
-        (check-opencl-error ()
+        (check-opencl-error () ()
           (clGetProgramInfo program +CL-PROGRAM-BINARIES+
                             (mem-ref retsize 'size-t)
                             binbuf-ptr
@@ -1343,11 +1350,11 @@ cl-get-program-info and foreign memory management."
 
 (defun cl-get-program-build-info (program device param)
   (with-foreign-object (retsize 'size-t)
-    (check-opencl-error ()
+    (check-opencl-error () ()
       (clGetProgramBuildInfo program device param
                              0 +NULL+ retsize))
     (with-foreign-object (retval :uchar (mem-ref retsize 'size-t))
-      (check-opencl-error ()
+      (check-opencl-error () ()
         (clGetProgramBuildInfo program device param
                                (mem-ref retsize 'size-t)
                                retval +NULL+))
@@ -1358,19 +1365,19 @@ cl-get-program-info and foreign memory management."
          (foreign-string-to-lisp retval))
         ((= param +CL-PROGRAM-BUILD-LOG+)
          (foreign-string-to-lisp retval))))))
-      
+
 ;; Kernel API
 (defun cl-create-kernel (program name)
-  (check-opencl-error err
+  (check-opencl-error err ()
     (with-foreign-string (sname name)
       (clCreateKernel program sname err))))
 
 (defun cl-create-kernels-in-program (program)
   (with-foreign-object (retsize 'size-t)
-    (check-opencl-error ()
+    (check-opencl-error () ()
       (clCreateKernelsInProgram program 0 +NULL+ retsize))
     (with-foreign-object (kernels 'cl-kernel (mem-ref retsize 'size-t))
-      (check-opencl-error ()
+      (check-opencl-error () ()
         (clCreateKernelsInProgram program (mem-ref retsize 'size-t)
                                   kernels +NULL+))
       (loop
@@ -1378,18 +1385,18 @@ cl-get-program-info and foreign memory management."
          collecting (mem-aref kernels 'cl-kernel i)))))
 
 (defun cl-clone-kernel (kernel)
-  (check-opencl-error err
+  (check-opencl-error err ()
     (clCloneKernel kernel err)))
 
 (defun cl-retain-kernel (kernel)
-  (check-opencl-error ()
+  (check-opencl-error () ()
     (clRetainKernel kernel)))
 
 (defun cl-release-kernel (kernel)
-  (check-opencl-error ()
+  (check-opencl-error () ()
     (clReleaseKernel kernel)))
 
-(defun cl-set-kernel-arg (kernel index
+(defun cl-set-kernel-arg (kernel arg-index
                           &key
                             value
                             (type 'cl-mem)
@@ -1408,14 +1415,14 @@ explicitly specified."
         (with-foreign-object (f type)
           (setf (mem-ref f type)
                 value)
-          (check-opencl-error ()
-            (clSetKernelArg kernel index size f)))
-        (check-opencl-error ()
-          (clSetKernelArg kernel index size +NULL+)))))
+          (check-opencl-error () ()
+            (clSetKernelArg kernel arg-index size f)))
+        (check-opencl-error () ()
+          (clSetKernelArg kernel arg-index size +NULL+)))))
 
-(defun cl-set-kernel-arg-svm-pointer (kernel index value)
-  (check-opencl-error ()
-    (clSetKernelArgSVMPointer kernel index value)))
+(defun cl-set-kernel-arg-svm-pointer (kernel arg-index value)
+  (check-opencl-error () ()
+    (clSetKernelArgSVMPointer kernel arg-index value)))
 
 (defun cl-set-kernel-exec-info (kernel
                                 &key
@@ -1435,7 +1442,7 @@ arguments can be set to adjust both settings simultaneously."
            for i from 0
            do (setf (mem-aref p :pointer i)
                     sp))
-        (check-opencl-error ()
+        (check-opencl-error () ()
           (clSetKernelExecInfo kernel +CL-KERNEL-EXEC-INFO-SVM-PTRS+
                                (* (foreign-type-size :pointer)
                                   np)
@@ -1444,12 +1451,62 @@ arguments can be set to adjust both settings simultaneously."
     (with-foreign-object (fgs 'cl-bool)
       (setf (mem-aref fgs 'cl-bool)
             fine-grain-system)
-      (check-opencl-error ()
+      (check-opencl-error () ()
         (clSetKernelExecInfo kernel +CL-KERNEL-EXEC-INFO-SVM-FINE-GRAIN-SYSTEM+
                              (foreign-type-size 'cl-bool)
                              fgs)))))
 
+(defun cl-get-kernel-info (kernel param)
+  (with-foreign-object (retsize 'size-t)
+    (check-opencl-error () ()
+      (clGetKernelInfo kernel param
+                       0 +NULL+
+                       retsize))
+    (let ((size (mem-ref retsize 'size-t)))
+      (with-foreign-object (retval :uchar size)
+        (check-opencl-error () ()
+          (clGetKernelInfo kernel param
+                           size retval
+                           +NULL+))
+        (cond
+          ((= param +CL-KERNEL-FUNCTION-NAME+)
+           (foreign-string-to-lisp retval))
+          ((= param +CL-KERNEL-NUM-ARGS+)
+           (mem-ref retval 'cl-uint))
+          ((= param +CL-KERNEL-REFERENCE-COUNT+)
+           'cl-uint)
+          ((= param +CL-KERNEL-CONTEXT+)
+           'cl-context)
+          ((= param +CL-KERNEL-PROGRAM+)
+           'cl-program)
+          ((= param +CL-KERNEL-ATTRIBUTES+)
+           (foreign-string-to-lisp retval)))))))
 
+(defun cl-get-kernel-arg-info (kernel arg-index param)
+  (with-foreign-object (retsize 'size-t)
+    (check-opencl-error () ()
+      (clGetKernelArgInfo kernel arg-index
+                          param
+                          0 +NULL+
+                          retsize))
+    (let ((size (mem-ref retsize 'size-t)))
+      (with-foreign-object (retval :uchar size)
+        (check-opencl-error () ()
+          (clGetKernelArgInfo kernel arg-index
+                              param
+                              size retval
+                              +NULL+))
+        (cond
+          ((= param +CL-KERNEL-ARG-ADDRESS-QUALIFIER+)
+           (mem-ref retval 'cl-kernel-arg-address-qualifier))
+          ((= param +CL-KERNEL-ARG-ACCESS-QUALIFIER+)
+           (mem-ref retval 'cl-kernel-arg-access-qualifier))
+          ((= param +CL-KERNEL-ARG-TYPE-NAME+)
+           (foreign-string-to-lisp retval))
+          ((= param +CL-KERNEL-ARG-TYPE-QUALIFIER+)
+           (mem-ref retval 'cl-kernel-arg-type-qualifier))
+          ((= param +CL-KERNEL-ARG-NAME+)
+           (foreign-string-to-lisp retval)))))))
 
 (defun cl-get-kernel-work-group-info (kernel device param)
   "Queries kernel for information about running on given device."
@@ -1464,7 +1521,7 @@ arguments can be set to adjust both settings simultaneously."
       ((= param +CL-KERNEL-LOCAL-MEM-SIZE+)
        (setf type 'cl-ulong)))
     (with-foreign-object (result type count)
-      (check-opencl-error ()
+      (check-opencl-error () ()
         (clGetKernelWorkGroupInfo kernel device param
                                   (* count (foreign-type-size type))
                                   result
@@ -1478,3 +1535,461 @@ arguments can be set to adjust both settings simultaneously."
             collecting (mem-aref result 'size-t i)))
         ((= param +CL-KERNEL-LOCAL-MEM-SIZE+)
          (mem-ref result 'cl-uint))))))
+
+(defun cl-get-kernel-sub-group-info (kernel device param
+                                     &key input)
+  "Queries kernel sub-group information.  input must be set to
+reasonable values per param value.
+
++CL-KERNEL-MAX-SUB-GROUP-SIZE-FOR-NDRANGE+: list of integers.
++CL-KERNEL-SUB-GROUP-COUNT-FOR-NDRANGE+: list of integers.
++CL-KERNEL-LOCAL-SIZE-FOR-SUB-GROUP-COUNT+: integer.
++CL-KERNEL-MAX-NUM-SUB-GROUPS+: ignored.
++CL-KERNEL-COMPILE-NUM-SUB-GROUPS+: ignored."
+  (cond
+    ((= param +CL-KERNEL-MAX-SUB-GROUP-SIZE-FOR-NDRANGE+)
+     (let* ((ninput (length input)))
+       (with-foreign-object (ptr 'size-t ninput)
+         (loop
+            for in in input
+            for i from 0
+            do (setf (mem-ref ptr 'size-t)
+                     in))
+         (with-foreign-object (retsize 'size-t)
+           (check-opencl-error () ()
+             (clGetKernelSubGroupInfo kernel device param
+                                      (* (foreign-type-size 'size-t)
+                                         ninput)
+                                      ptr
+                                      0 +NULL+
+                                      retsize))
+           (with-foreign-object (retval :uchar (mem-ref retsize 'size-t))
+             (check-opencl-error () ()
+               (clGetKernelSubGroupInfo kernel device param
+                                        (* (foreign-type-size 'size-t)
+                                           ninput)
+                                        ptr
+                                        (mem-ref retsize 'size-t)
+                                        retval +NULL+))
+             (mem-ref retval 'size-t))))))
+    ((= param +CL-KERNEL-SUB-GROUP-COUNT-FOR-NDRANGE+)
+     (let* ((ninput (length input)))
+       (with-foreign-object (ptr 'size-t ninput)
+         (loop
+            for in in input
+            for i from 0
+            do (setf (mem-ref ptr 'size-t)
+                     in))
+         (with-foreign-object (retsize 'size-t)
+           (check-opencl-error () ()
+             (clGetKernelSubGroupInfo kernel device param
+                                      (* (foreign-type-size 'size-t)
+                                         ninput)
+                                      ptr
+                                      0 +NULL+
+                                      retsize))
+           (with-foreign-object (retval :uchar (mem-ref retsize 'size-t))
+             (check-opencl-error () ()
+               (clGetKernelSubGroupInfo kernel device param
+                                        (* (foreign-type-size 'size-t)
+                                           ninput)
+                                        ptr
+                                        (mem-ref retsize 'size-t)
+                                        retval +NULL+))
+             (mem-ref retval 'size-t))))))
+    ((= param +CL-KERNEL-LOCAL-SIZE-FOR-SUB-GROUP-COUNT+)
+     (with-foreign-objects ((ptr 'size-t)
+                            (retsize 'size-t))
+       (setf (mem-ref ptr 'size-t) input)
+       (check-opencl-error () ()
+         (clGetKernelSubGroupInfo kernel device param
+                                  (foreign-type-size 'size-t)
+                                  ptr
+                                  0
+                                  +NULL+
+                                  retsize))
+       (let* ((nret (floor (mem-ref retsize 'size-t)
+                           (foreign-type-size 'size-t))))
+         (with-foreign-object (retval 'size-t nret)
+           (check-opencl-error () ()
+             (clGetKernelSubGroupInfo kernel device param
+                                      (foreign-type-size 'size-t)
+                                      ptr
+                                      (mem-ref retsize 'size-t)
+                                      retval
+                                      +NULL+))
+           (foreign-array-to-lisp retval (list :array 'size-t nret))))))
+    ((= param +CL-KERNEL-MAX-NUM-SUB-GROUPS+)
+     (with-foreign-object (retsize 'size-t)
+       (check-opencl-error () ()
+         (clGetKernelSubGroupInfo kernel device param
+                                  0
+                                  +NULL+
+                                  0
+                                  +NULL+
+                                  retsize))
+       (with-foreign-object (retval 'size-t)
+         (check-opencl-error () ()
+           (clGetKernelSubGroupInfo kernel device param
+                                    0
+                                    +NULL+
+                                    (mem-ref retsize 'size-t)
+                                    retval
+                                    +NULL+))
+         (mem-ref retval 'size-t))))
+    ((= param +CL-KERNEL-COMPILE-NUM-SUB-GROUPS+)
+     (with-foreign-object (retsize 'size-t)
+       (check-opencl-error () ()
+         (clGetKernelSubGroupInfo kernel device param
+                                  0
+                                  +NULL+
+                                  0
+                                  +NULL+
+                                  retsize))
+       (with-foreign-object (retval 'size-t)
+         (check-opencl-error () ()
+           (clGetKernelSubGroupInfo kernel device param
+                                    0
+                                    +NULL+
+                                    (mem-ref retsize 'size-t)
+                                    retval
+                                    +NULL+))
+         (mem-ref retval 'size-t))))))
+
+;; Event Object APIs
+(defun cl-wait-for-events (events)
+  (let* ((n (length events)))
+    (with-foreign-object (evs 'cl-event n)
+      (loop
+         for i below n
+         for ev in events
+         do (setf (mem-ref evs 'cl-event i)
+                  ev))
+      (check-opencl-error () ()
+        (clWaitForEvents n
+                         evs)))))
+
+(defun cl-get-event-info (event param)
+  (let* ((type
+          (cond
+            ((= param +CL-EVENT-COMMAND-QUEUE+)
+             'cl-command-queue)
+            ((= param +CL-EVENT-CONTEXT+)
+             'cl-context)
+            ((= param +CL-EVENT-COMMAND-TYPE+)
+             'cl-command-type)
+            ((= param +CL-EVENT-COMMAND-EXECUTION-STATUS+)
+             'cl-int)
+            ((= param +CL-EVENT-REFERENCE-COUNT+)
+             'cl-uint))))
+    (with-foreign-object (retsize 'size-t)
+      (check-opencl-error () ()
+        (clGetEventInfo event param
+                        0 +NULL+
+                        retsize))
+      (with-foreign-object (retval type)
+        (check-opencl-error () ()
+          (clGetEventInfo event param
+                          (mem-ref retsize 'size-t)
+                          retval
+                          +NULL+))))))
+
+(defun cl-create-user-event (context)
+  (check-opencl-error err ()
+    (clCreateUserEvent context err)))
+
+(defun cl-retain-event (event)
+  (check-opencl-error () ()
+    (clRetainEvent event)))
+
+(defun cl-release-event (event)
+  (check-opencl-error () ()
+    (clReleaseEvent event)))
+
+(defun cl-set-user-event-status (event status)
+  (check-opencl-error () ()
+    (clSetUserEventStatus event status)))
+
+(defun cl-set-event-callback (event callback-type callback
+                              &key
+                                user-data)
+  (check-opencl-error () ()
+    (clSetEventCallback event callback-type callback
+                        (if user-data
+                            user-data
+                            +NULL+))))
+
+;; Profiling APIs
+(defun cl-get-event-profiling-info (event param)
+  (let* ((type
+          (cond
+            ((= param +CL-PROFILING-COMMAND-QUEUED+)
+             'cl-ulong)
+            ((= param +CL-PROFILING-COMMAND-SUBMIT+)
+             'cl-ulong)
+            ((= param +CL-PROFILING-COMMAND-START+)
+             'cl-ulong)
+            ((= param +CL-PROFILING-COMMAND-END+)
+             'cl-ulong)
+            ((= param +CL-PROFILING-COMMAND-COMPLETE+)
+             'cl-ulong))))
+    (with-foreign-object (retsize 'size-t)
+      (check-opencl-error () ()
+        (clGetEventProfilingInfo event param
+                                 0 +NULL+
+                                 retsize))
+      (with-foreign-object (retval type)
+        (check-opencl-error () ()
+          (clGetEventProfilingInfo event param
+                                   (mem-ref retsize 'size-t)
+                                   retval
+                                   +NULL+))))))
+
+;; Flush and Finish APIs
+(defun cl-flush (queue)
+  (check-opencl-error () ()
+    (clFlush queue)))
+
+(defun cl-finish (queue)
+  (check-opencl-error () ()
+    (clFinish queue)))
+
+;; Enqueued Commands APIs
+(defun cl-enqueue-read-buffer (queue buffer array-type
+                               &key
+                                 (offset 0)
+                                 make-array-args
+                                 event-wait-list
+                                 blocking-read-p)
+  "Enqueues reading from a buffer in the command queue.  array-type
+should be a CFFI array type denoting how the foreign array data is
+stored, i.e. (:array element-type dim1-size dim2-size ...).
+make-array-args will be passed to cffi:foreign-array-to-lisp along
+with the read data and the array-type.  There are 2 main modes of
+operation:
+
+blocking-read-p NIL: Asynchronous read.  cl-enqueue-read-buffer will
+return a list with two elements: An event handle and a function that
+when called with no arguments will return the data read out of the
+buffer as well as cleaning up allocated foreign memory.  If an error
+occurs while attempting to enqueue the read instruction, the foreign
+memory will be freed before signaling an error.  The event handle
+returned will need to eventually have cl-release-event called on it to
+avoid a memory leak.
+
+blocking-read-p non-NIL: Synchronous read.  cl-enqueue-read-buffer will
+return the data read out of the buffer.
+
+offset can denote an offset in bytes at which to start reading from
+the buffer.
+
+NOTE: Do not throw away the buffer read function for asynchronous
+mode, as there is no reasonable way to avoid a memory leak.  Even with
+finalization, the OpenCL queue would need to be blocked by the
+finalizer to avoid a segfault."
+  (destructuring-bind (type &rest dims) (rest array-type)
+    (let* ((size (apply #'*
+                        (foreign-type-size type)
+                        dims))
+           (ptr (foreign-alloc type :count size))
+           (ewl (if event-wait-list
+                    (let* ((res
+                            (foreign-array-alloc (coerce event-wait-list 'array)
+                                                 (list :array 'cl-event
+                                                       (length event-wait-list)))))
+                      (loop
+                         for x in event-wait-list
+                         for i from 0
+                         do (setf (mem-aref res 'cl-event i)
+                                  x))
+                      res)
+                    +NULL+)))
+      (labels ((cleanup ()
+                 (foreign-free ptr)
+                 (when event-wait-list
+                   (foreign-free ewl))))
+        (with-foreign-object (event 'cl-event)
+          (if blocking-read-p
+              (progn
+                (check-opencl-error () #'cleanup
+                  (clEnqueueReadBuffer queue
+                                       buffer
+                                       +CL-TRUE+
+                                       offset
+                                       size
+                                       ptr
+                                       (if event-wait-list
+                                           (length event-wait-list)
+                                           0)
+                                       ewl
+                                       ;; no need to use event handle
+                                       +NULL+))
+                (let* ((result (apply #'foreign-array-to-lisp
+                                      ptr
+                                      array-type
+                                      make-array-args)))
+                  (cleanup)
+                  result))
+              (progn
+                (check-opencl-error () #'cleanup
+                  (clEnqueueReadBuffer queue
+                                       buffer
+                                       +CL-FALSE+
+                                       offset
+                                       size
+                                       ptr
+                                       (if event-wait-list
+                                           (length event-wait-list)
+                                           0)
+                                       ewl
+                                       event))
+                (list (mem-ref event 'cl-event)
+                      (lambda ()
+                        (let* ((result (apply #'foreign-array-to-lisp
+                                              ptr
+                                              array-type
+                                              make-array-args)))
+                          (cleanup)
+                          result))))))))))
+
+(defun cl-enqueue-read-buffer-rect
+    (queue buffer array-type
+     &key
+       (width 1)
+       (height 1)
+       (depth 1)
+       buffer-origin
+       (buffer-row-pitch 0)
+       (buffer-slice-pitch 0)
+       make-array-args
+       event-wait-list
+       blocking-read-p)
+  "Enqueues rectangular reading from a buffer in the command queue.
+array-type should be a CFFI array type denoting how the foreign array
+data is stored, i.e. (:array element-type dim1-size dim2-size ...).
+make-array-args will be passed to cffi:foreign-array-to-lisp along
+with the read data and the array-type.  There are 2 main modes of
+operation:
+
+blocking-read-p NIL: Asynchronous read.  cl-enqueue-read-buffer will
+return a list with two elements: An event handle and a function that
+when called with no arguments will return the data read out of the
+buffer as well as cleaning up allocated foreign memory.  If an error
+occurs while attempting to enqueue the read instruction, the foreign
+memory will be freed before signaling an error.  The event handle
+returned will need to eventually have cl-release-event called on it to
+avoid a memory leak.
+
+blocking-read-p non-NIL: Synchronous read.  cl-enqueue-read-buffer will
+return the data read out of the buffer.
+
+buffer-origin can be NIL or a list of 3 elements denoting the 3-D
+origin to start readinfrom the buffer.  Set unused dimensions' origins
+to 0.
+
+width, height, and depth need to be set to reasonable values.  You can
+make them match your array-type, but all that is required is that the
+array-type has enough space to store the data.
+
+NOTE: Do not throw away the buffer read function for asynchronous
+mode, as there is no reasonable way to avoid a memory leak.  Even with
+finalization, the OpenCL queue would need to be blocked by the
+finalizer to avoid a segfault."
+  (destructuring-bind (type &rest dims) (rest array-type)
+    (let* ((element-size (foreign-type-size type))
+           (size (apply #'*
+                        (foreign-type-size type)
+                        dims))
+           (ptr (foreign-alloc type :count size))
+           (ewl (if event-wait-list
+                    (let* ((res
+                            (foreign-array-alloc (coerce event-wait-list 'array)
+                                                 (list :array 'cl-event
+                                                       (length event-wait-list)))))
+                      (loop
+                         for x in event-wait-list
+                         for i from 0
+                         do (setf (mem-aref res 'cl-event i)
+                                  x))
+                      res)
+                    +NULL+)))
+      (with-foreign-objects ((region 'size-t 3)
+                             (buffer-origin-ptr 'size-t 3)
+                             (host-origin-ptr 'size-t 3))
+        (loop
+           for i below 2
+           do (setf (mem-aref host-origin-ptr 'size-t i)
+                    0))
+        (if buffer-origin
+            (loop
+               for x in buffer-origin
+               for i from 0
+               do (setf (mem-aref buffer-origin-ptr 'size-t i)
+                        x))
+            (loop
+               for i below 2
+               do (setf (mem-aref buffer-origin-ptr 'size-t i)
+                        0)))
+        (setf (mem-aref region 'size-t 0)
+              (* element-size width))
+        (setf (mem-aref region 'size-t 1)
+              height)
+        (setf (mem-aref region 'size-t 2)
+              depth)
+        (labels ((cleanup ()
+                   (foreign-free ptr)
+                   (when event-wait-list
+                     (foreign-free ewl))))
+          (with-foreign-object (event 'cl-event)
+            (if blocking-read-p
+                (progn
+                  (check-opencl-error () #'cleanup
+                    (clEnqueueReadBufferRect queue
+                                             buffer
+                                             +CL-TRUE+
+                                             buffer-origin-ptr
+                                             host-origin-ptr
+                                             region
+                                             buffer-row-pitch
+                                             buffer-slice-pitch
+                                             0
+                                             0
+                                             ptr
+                                             (if event-wait-list
+                                                 (length event-wait-list)
+                                                 0)
+                                             ewl
+                                             ;; no need to use event handle
+                                             +NULL+))
+                  (let* ((result (apply #'foreign-array-to-lisp
+                                        ptr
+                                        array-type
+                                        make-array-args)))
+                    (cleanup)
+                    result))
+                (progn
+                  (check-opencl-error () #'cleanup
+                    (clEnqueueReadBufferRect queue
+                                             buffer
+                                             +CL-FALSE+
+                                             buffer-origin-ptr
+                                             host-origin-ptr
+                                             region
+                                             buffer-row-pitch
+                                             buffer-slice-pitch
+                                             0
+                                             0
+                                             ptr
+                                             (if event-wait-list
+                                                 (length event-wait-list)
+                                                 0)
+                                             ewl
+                                             event))
+                  (list (mem-ref event 'cl-event)
+                        (lambda ()
+                          (let* ((result (apply #'foreign-array-to-lisp
+                                                ptr
+                                                array-type
+                                                make-array-args)))
+                            (cleanup)
+                            result)))))))))))
