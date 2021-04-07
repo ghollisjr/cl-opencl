@@ -1804,10 +1804,14 @@ finalizer to avoid a segfault."
                                   x))
                       res)
                     +NULL+)))
-      (labels ((cleanup ()
-                 (foreign-free ptr)
+      (labels ((cleanupptr ()
+                 (foreign-free ptr))
+               (cleanupewl ()
                  (when event-wait-list
-                   (foreign-free ewl))))
+                   (foreign-free ewl)))
+               (cleanup ()
+                 (cleanupptr)
+                 (cleanupewl)))
         (with-foreign-object (event 'cl-event)
           (if blocking-read-p
               (progn
@@ -1843,13 +1847,14 @@ finalizer to avoid a segfault."
                                            0)
                                        ewl
                                        event))
+                (cleanupewl)
                 (list (mem-ref event 'cl-event)
                       (lambda ()
                         (let* ((result (apply #'foreign-array-to-lisp
                                               ptr
                                               array-type
                                               make-array-args)))
-                          (cleanup)
+                          (cleanupptr)
                           result))))))))))
 
 (defun cl-enqueue-read-buffer-rect
@@ -1936,10 +1941,14 @@ finalizer to avoid a segfault."
               height)
         (setf (mem-aref region 'size-t 2)
               depth)
-        (labels ((cleanup ()
-                   (foreign-free ptr)
+        (labels ((cleanupptr ()
+                   (foreign-free ptr))
+                 (cleanupewl ()
                    (when event-wait-list
-                     (foreign-free ewl))))
+                     (foreign-free ewl)))
+                 (cleanup ()
+                   (cleanupptr)
+                   (cleanupewl)))
           (with-foreign-object (event 'cl-event)
             (if blocking-read-p
                 (progn
@@ -1985,11 +1994,97 @@ finalizer to avoid a segfault."
                                                  0)
                                              ewl
                                              event))
+                  (cleanupewl)
                   (list (mem-ref event 'cl-event)
                         (lambda ()
                           (let* ((result (apply #'foreign-array-to-lisp
                                                 ptr
                                                 array-type
                                                 make-array-args)))
-                            (cleanup)
+                            (cleanupptr)
                             result)))))))))))
+
+(defun cl-enqueue-write-buffer (queue buffer element-type data
+                                &key
+                                  blocking-write-p
+                                  (offset 0)
+                                  event-wait-list)
+  "Enqueues write instructions for the buffer and supplied data.
+  There are two modes of operation: blocking and non-blocking.
+
+blocking-write-p is NIL: Asynchronous operation.  Data is queued for
+writing, but not necessarily written on return.  The return value is a
+list containing an event handle and a cleanup function to free the
+foreign data once the write has completed.
+
+blocking-write-p is non-NIL: Synchronous operation.  The return value
+is irrelevant and no foreign memory management is necessary.
+
+element-type should be a CFFI type.
+
+offset is a byte-offset into the output buffer.
+
+event-wait-list can be a list of events required to finish before the
+write should occur."
+  (let* ((n (length data))
+         (size (* n (foreign-type-size element-type)))
+         (ptr (foreign-alloc element-type :count n))
+         (ewl
+          (if event-wait-list
+              (let* ((res
+                      (foreign-array-alloc (coerce event-wait-list 'array)
+                                           (list :array 'cl-event
+                                                 (length event-wait-list)))))
+                (loop
+                   for x in event-wait-list
+                   for i from 0
+                   do (setf (mem-aref res 'cl-event i)
+                            x))
+                res)
+              +NULL+)))
+    (loop
+       for d in data
+       for i from 0
+       do (setf (mem-aref ptr element-type i)
+                d))
+    (labels ((cleanupptr ()
+               (foreign-free ptr))
+             (cleanupewl ()
+               (when event-wait-list
+                 (foreign-free ewl)))
+             (cleanup ()
+               (cleanupptr)
+               (cleanupewl)))
+      (with-foreign-object (event 'cl-event)
+        (if blocking-write-p
+            (progn
+              (check-opencl-error () #'cleanup
+                (clEnqueueWriteBuffer queue
+                                      buffer
+                                      +CL-TRUE+
+                                      offset
+                                      size
+                                      ptr
+                                      (if event-wait-list
+                                          (length event-wait-list)
+                                          0)
+                                      ewl
+                                      +NULL+))
+              (cleanup)
+              NIL)
+            (progn
+              (check-opencl-error () #'cleanup
+                (clEnqueueWriteBuffer queue
+                                      buffer
+                                      +CL-FALSE+
+                                      offset
+                                      size
+                                      ptr
+                                      (if event-wait-list
+                                          (length event-wait-list)
+                                          0)
+                                      ewl
+                                      event))
+              (cleanupewl)
+              (list (mem-ref event 'cl-event)
+                    #'cleanupptr)))))))
