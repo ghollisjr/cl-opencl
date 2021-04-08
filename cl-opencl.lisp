@@ -1282,7 +1282,6 @@ extracting binaries."
   (with-foreign-object (retsize 'size-t)
     (check-opencl-error () ()
       (clGetProgramInfo program param 0 +NULL+ retsize))
-    (print (mem-ref retsize 'size-t))
     (with-foreign-object (retval :char (mem-ref retsize 'size-t))
       (check-opencl-error () ()
         (clGetProgramInfo program param (mem-ref retsize 'size-t)
@@ -1892,7 +1891,8 @@ buffer-origin can be NIL or a list of 3 elements denoting the 3-D
 origin to start readinfrom the buffer.  Set unused dimensions' origins
 to 0.
 
-width, height, and depth need to be set to reasonable values.  You can
+width, height, and depth need to be set to reasonable values.  Note
+that width denotes the number of elements rather than bytes.  You can
 make them match your array-type, but all that is required is that the
 array-type has enough space to store the data.
 
@@ -2088,3 +2088,502 @@ write should occur."
               (cleanupewl)
               (list (mem-ref event 'cl-event)
                     #'cleanupptr)))))))
+
+(defun sequence->3D-array (sequence width height depth
+                           &key
+                             (index-mode :first)
+                             make-array-key-args)
+  "Converts sequence into 3-D array of width-height-depth dimensions.
+make-array-key-args will be supplied to make-array.  The ordering
+taken from sequence is controlled via the index-mode option.
+
+index-mode :first means (0 0 0), (1 0 0), ..., (0 1 0), (1 1 0), ... index ordering.
+index-mode :last means (0 0 0), (0 0 1), ..., (0 1 0), (0 1 1), ... index ordering.
+
+So for example:
+(sequence->3d-array (list 1 2 3 4 5 6) 3 2 1 :index-mode :first) ==> #3A(((1) (4)) ((2) (5)) ((3) (6))),
+(sequence->3d-array (list 1 2 3 4 5 6) 3 2 1 :index-mode :last) ==> #3A(((1) (2)) ((3) (4)) ((5) (6)))"
+  (let* ((result (apply #'make-array
+                        (list width height depth)
+                        make-array-key-args))
+         (index 0))
+    (labels ((indexlast (i)
+               (list (floor i (* depth height))
+                     (mod (floor i depth) height)
+                     (mod i depth))
+               )
+             (indexfirst (i)
+               (list (mod i width)
+                     (mod (floor i width) height)
+                     (floor i (* width height)))))
+      (let* ((ifn (if (eq index-mode :first)
+                      (lambda (x)
+                        (setf (apply #'aref result (indexfirst (1- (incf index))))
+                              x))
+                      (lambda (x)
+                        (setf (apply #'aref result (indexlast (1- (incf index))))
+                              x)))))
+        (map nil ifn sequence)
+        result))))
+
+(defun 3D-array->list (array
+                       &key
+                         (index-mode :first))
+  "Converts a 3-D array into a list.  The ordering taken from sequence
+is controlled via the index-mode option.
+
+index-mode :first means (0 0 0), (1 0 0), ..., (0 1 0), (1 1 0), ... index ordering.
+index-mode :last means (0 0 0), (0 0 1), ..., (0 1 0), (0 1 1), ... index ordering.
+
+So for example:
+(3D-array->list #3A(((1) (4)) ((2) (5)) ((3) (6))) :index-mode :first) ==> (1 2 3 4 5 6),
+(3D-array->list #3A(((1) (4)) ((2) (5)) ((3) (6))) :index-mode :last) ==> (1 4 2 5 3 6)."
+  (destructuring-bind (width height depth)
+      (array-dimensions array)
+    (labels ((indexlast (i)
+               (list (floor i (* depth height))
+                     (mod (floor i depth) height)
+                     (mod i depth))
+               )
+             (indexfirst (i)
+               (list (mod i width)
+                     (mod (floor i width) height)
+                     (floor i (* width height)))))
+      (let* ((size (* width height depth)))
+        (if (eq index-mode :first)
+            (loop
+               for i below size
+               collecting (apply #'aref array (indexfirst i)))
+            (loop
+               for i below size
+               collecting (apply #'aref array (indexlast i))))))))
+
+(defun cl-enqueue-write-buffer-rect (queue buffer element-type data
+                                     &key
+                                       (width 1)
+                                       (height 1)
+                                       (depth 1)
+                                       buffer-origin
+                                       (buffer-row-pitch 0)
+                                       (buffer-slice-pitch 0)
+                                       event-wait-list
+                                       blocking-write-p)
+  "Enqueues rectangular write into buffer.  There are two modes of operation:
+
+cl-blocking-write-p NIL: Asynchronous write.  Return value is a list
+containing an event handle and a cleanup function to call once the
+event has completed in order to free allocated foreign memory.
+
+data should be a list or a 3-D array.  If data is a 3-D array, then
+width-height-depth will be set to match the array.  If data is a list,
+then the width-height-depth parameters should match the number of
+elements in the list.  The 3D-array->list utility function will be
+used to convert a 3-D array into a list if a 3-D array is supplied.
+To control index ordering, call 3D-array->list directly.  Default
+behavior of 3D-array->sequence is :index-mode :first, see function
+documentation.  OpenCL uses :first index convention.
+
+cl-blocking-write-p non-NIL: Synchronous write.  Return value is NIL.
+
+buffer-origin can be a list of integers to denote an offset in the
+buffer write destination (see OpenCL documentation), or NIL to denote
+the default non-offset write.
+
+Set width, height, and depth to reasonable values if using a data
+list.  Note that width refers to the number of elements rather than
+bytes, which is computed from element-type."
+  (let* ((data (if (typep data 'sequence)
+                   (sequence->3D-array data width height depth)
+                   data))
+         (datalist (if (listp data)
+                       data
+                       (3D-array->list data)))
+         (width (if (listp data)
+                    width
+                    (first (array-dimensions data))))
+         (height (if (listp data)
+                     height
+                     (second (array-dimensions data))))
+         (depth (if (listp data)
+                    data
+                    (third (array-dimensions data))))
+         (ptr (let* ((res
+                      (foreign-alloc element-type :count (* width height depth))))
+                (loop
+                   for d in datalist
+                   for i from 0
+                   do (setf (mem-aref res element-type i)
+                            d))
+                res))
+         (ewl (if event-wait-list
+                  (let ((res (foreign-alloc 'cl-event :count
+                                            (length event-wait-list))))
+                    (loop
+                       for ev in event-wait-list
+                       for i from 0
+                       do (setf (mem-aref res 'cl-event i)
+                                ev))
+                    res)
+                  +NULL+))
+         (buffer-origin-ptr
+          (let* ((res (foreign-alloc 'size-t :count 3)))
+            (if buffer-origin
+                (loop
+                   for x in buffer-origin
+                   for i from 0
+                   do (setf (mem-aref res 'size-t i)
+                            x))
+                (loop
+                   for i below 3
+                   do (setf (mem-aref res 'size-t i)
+                            0)))
+            res))
+         (host-origin-ptr
+          (let* ((res (foreign-alloc 'size-t :count 3)))
+            (loop
+               for i below 3
+               do (setf (mem-aref res 'size-t i) 0))
+            res)))
+    (labels ((cleanuptmp ()
+               (foreign-free host-origin-ptr)
+               (foreign-free buffer-origin-ptr)
+               (when event-wait-list
+                 (foreign-free ewl)))
+             (cleanupdata ()
+               (foreign-free ptr))
+             (cleanup ()
+               (cleanuptmp)
+               (cleanupdata)))
+      (with-foreign-objects ((region 'size-t 3))
+        (setf (mem-aref region 'size-t 0)
+              (* width (foreign-type-size element-type)))
+        (setf (mem-aref region 'size-t 1)
+              height)
+        (setf (mem-aref region 'size-t 2)
+              depth)
+        (if blocking-write-p
+            (progn
+              (check-opencl-error () #'cleanup
+                (clEnqueueWriteBufferRect queue
+                                          buffer
+                                          +CL-TRUE+
+                                          buffer-origin-ptr
+                                          host-origin-ptr
+                                          region
+                                          buffer-row-pitch
+                                          buffer-slice-pitch
+                                          0
+                                          0
+                                          ptr
+                                          (if event-wait-list
+                                              (length event-wait-list)
+                                              0)
+                                          ewl
+                                          +NULL+))
+              (cleanup)
+              NIL)
+            (with-foreign-object (event 'cl-event)
+              (check-opencl-error () #'cleanup
+                (clEnqueueWriteBufferRect queue
+                                          buffer
+                                          +CL-TRUE+
+                                          buffer-origin-ptr
+                                          host-origin-ptr
+                                          region
+                                          buffer-row-pitch
+                                          buffer-slice-pitch
+                                          0
+                                          0
+                                          ptr
+                                          (if event-wait-list
+                                              (length event-wait-list)
+                                              0)
+                                          ewl
+                                          event))
+              (cleanuptmp)
+              (list (mem-ref event 'cl-event)
+                    #'cleanupdata)))))))
+
+(defun cl-enqueue-fill-buffer (queue buffer byte-pattern size
+                               &key
+                                 (offset 0)
+                                 event-wait-list)
+  "Enqueues fill write to buffer.  byte-pattern should be a list of
+(unsigned-byte 8) values that will repeatedly be written into the
+buffer.  size should be the number of bytes in total to write.
+
+There is only asynchronous operation for this write function. Return
+value is a list of an event and a cleanup function to call once the
+event has completed."
+  (let* ((n (length byte-pattern))
+         (ptr (foreign-alloc :uchar :count n))
+         (ewl
+          (if event-wait-list
+              (let* ((res
+                      (foreign-array-alloc (coerce event-wait-list 'array)
+                                           (list :array 'cl-event
+                                                 (length event-wait-list)))))
+                (loop
+                   for x in event-wait-list
+                   for i from 0
+                   do (setf (mem-aref res 'cl-event i)
+                            x))
+                res)
+              +NULL+)))
+    (loop
+       for d in byte-pattern
+       for i from 0
+       do (setf (mem-aref ptr :uchar i)
+                d))
+    (labels ((cleanupptr ()
+               (foreign-free ptr))
+             (cleanupewl ()
+               (when event-wait-list
+                 (foreign-free ewl)))
+             (cleanup ()
+               (cleanupptr)
+               (cleanupewl)))
+      (with-foreign-object (event 'cl-event)
+        (check-opencl-error () #'cleanup
+          (clEnqueueFillBuffer queue
+                               buffer
+                               ptr
+                               n
+                               offset
+                               size
+                               (if event-wait-list
+                                   (length event-wait-list)
+                                   0)
+                               ewl
+                               event))
+        (cleanupewl)
+        (list (mem-ref event 'cl-event)
+              #'cleanupptr)))))
+
+(defun cl-enqueue-copy-buffer (queue src-buffer dst-buffer size
+                               &key
+                                 (src-offset 0)
+                                 (dst-offset 0)
+                                 event-wait-list)
+  "Enqueues copy from src-buffer to dst-buffer.  Return value is a an
+event for copy completion."
+  (let* ((ewl (if event-wait-list
+                  (let* ((res
+                          (foreign-alloc 'cl-event :count (length event-wait-list))))
+                    (loop
+                       for ev in event-wait-list
+                       for i from 0
+                       do (setf (mem-ref res 'cl-event i)
+                                ev))
+                    res)
+                  +NULL+)))
+    (labels ((cleanup ()
+               (when event-wait-list
+                 (foreign-free ewl))))
+      (with-foreign-object (event 'cl-event)
+        (check-opencl-error () #'cleanup
+          (clEnqueueCopyBuffer queue
+                               src-buffer
+                               dst-buffer
+                               src-offset
+                               dst-offset
+                               size
+                               (if event-wait-list
+                                   (length event-wait-list)
+                                   0)
+                               ewl
+                               event))
+        (cleanup)
+        (mem-ref event 'cl-event)))))
+
+(defun cl-enqueue-copy-buffer-rect
+    (queue src-buffer dst-buffer
+     &key
+       (width 1)
+       (height 1)
+       (depth 1)
+       (src-row-pitch 0)
+       (src-slice-pitch 0)
+       src-origin
+       (dst-row-pitch 0)
+       (dst-slice-pitch 0)
+       dst-origin
+       event-wait-list)
+  "Enqueues rectangular copy from src-buffer to dst-buffer.  Return
+value is an event for copy completion.
+
+src-origin and dst-origin can be lists with 3 elements denoting the
+origin in the source and destination buffers respectively.
+
+NOTE: In contrast to other similar functions, width should denote the
+width in bytes, while height and depth are the number of rows and
+slices respectively.  The product (* width height depth) will be the
+total amount of data copied."
+  (let* ((ewl (if event-wait-list
+                  (let* ((res
+                          (foreign-alloc 'cl-event :count (length event-wait-list))))
+                    (loop
+                       for ev in event-wait-list
+                       for i from 0
+                       do (setf (mem-ref res 'cl-event i)
+                                ev))
+                    res)
+                  +NULL+))
+         (src-origin-ptr (let* ((res
+                                 (foreign-alloc 'size-t :count 3)))
+                           (if src-origin
+                               (loop
+                                  for x in src-origin
+                                  for i below 3
+                                  do (setf (mem-aref res 'size-t i)
+                                           x))
+                               (loop
+                                  for i below 3
+                                  do (setf (mem-aref res 'size-t i)
+                                           0)))
+                           res))
+         (dst-origin-ptr (let* ((res
+                                 (foreign-alloc 'size-t :count 3)))
+                           (if dst-origin
+                               (loop
+                                  for x in dst-origin
+                                  for i below 3
+                                  do (setf (mem-aref res 'size-t i)
+                                           x))
+                               (loop
+                                  for i below 3
+                                  do (setf (mem-aref res 'size-t i)
+                                           0)))
+                           res)))
+    (with-foreign-object (region 'size-t 3)
+      (setf (mem-aref region 'size-t 0)
+            width)
+      (setf (mem-aref region 'size-t 1)
+            height)
+      (setf (mem-aref region 'size-t 2)
+            depth)
+      (labels ((cleanup ()
+                 (foreign-free src-origin-ptr)
+                 (foreign-free dst-origin-ptr)
+                 (when event-wait-list
+                   (foreign-free ewl))))
+        (with-foreign-object (event 'cl-event)
+          (check-opencl-error () #'cleanup
+            (clEnqueueCopyBufferRect queue
+                                     src-buffer
+                                     dst-buffer
+                                     src-origin-ptr
+                                     dst-origin-ptr
+                                     region
+                                     src-row-pitch
+                                     src-slice-pitch
+                                     dst-row-pitch
+                                     dst-slice-pitch
+                                     (if event-wait-list
+                                         (length event-wait-list)
+                                         0)
+                                     ewl
+                                     event))
+          (cleanup)
+          (mem-ref event 'cl-event))))))
+
+;; Parse pixel into Lisp
+(defun pixel->lisp (pixel-ptr format)
+  "Takes foreign data located in pixel-ptr with plist format and
+returns Lisp data suitable for that pixel type.  For 1-channel pixels,
+numerical value is returned.  For multi-channel pixels, a list of
+numerical values is returned."
+  (destructuring-bind (&key image-channel-data-type
+                            image-channel-order)
+      format
+    (let* ((ndims
+            (case image-channel-order
+              (+CL-R+ 1)
+              (+CL-RX+ 1)
+              (+CL-A+ 1)
+              (+CL-INTENSITY+ 1)
+              (+CL-LUMINANCE+ 1)
+              (+CL-DEPTH+ 1)
+              (+CL-RG+ 2)
+              (+CL-RGX+ 2)
+              (+CL-RA+ 2)
+              (+CL-RGB+ 3)
+              (+CL-RGBX+ 3)
+              (+CL-RGBA+ 4)
+              (+CL-SRGB+ 3)
+              (+CL-SRGBX+ 3)
+              (+CL-SRGBA+ 4)
+              (+CL-SBGRA+ 4)
+              (+CL-ARGB+ 4)
+              (+CL-BGRA+ 4)
+              (+CL-ABGR+ 4)
+              (+CL-DEPTH-STENCIL+ 1)))
+           (type (image-channel-type->data-type image-channel-data-type)))
+      (if (= ndims 1)
+          (mem-ref pixel-ptr type)
+          (loop
+             for i below ndims
+             collecting (mem-aref pixel-ptr type i))))))
+
+;; Lisp to pixel
+(defun lisp->pixel (lisp-pixel ptr format)
+  "Places pixel data in foreign ptr formatted by plist format and
+using Lisp data lisp-pixel suitable for that pixel type.  1-channel
+pixels use numeric types, and multi-channel pixels use a list of
+numerical values."
+      (destructuring-bind (&key image-channel-data-type
+                                image-channel-order)
+          format
+        (let* ((ndims
+                (case image-channel-order
+                  (+CL-R+ 1)
+                  (+CL-RX+ 1)
+                  (+CL-A+ 1)
+                  (+CL-INTENSITY+ 1)
+                  (+CL-LUMINANCE+ 1)
+                  (+CL-DEPTH+ 1)
+                  (+CL-RG+ 2)
+                  (+CL-RGX+ 2)
+                  (+CL-RA+ 2)
+                  (+CL-RGB+ 3)
+                  (+CL-RGBX+ 3)
+                  (+CL-RGBA+ 4)
+                  (+CL-SRGB+ 3)
+                  (+CL-SRGBX+ 3)
+                  (+CL-SRGBA+ 4)
+                  (+CL-SBGRA+ 4)
+                  (+CL-ARGB+ 4)
+                  (+CL-BGRA+ 4)
+                  (+CL-ABGR+ 4)
+                  (+CL-DEPTH-STENCIL+ 1)))
+               (type (image-channel-type->data-type image-channel-data-type)))
+          (if (= ndims 1)
+              (setf (mem-ref ptr type)
+                    lisp-pixel)
+              (loop
+                 for x in lisp-pixel
+                 for i below ndims
+                 do (setf (mem-aref ptr type i)
+                          x))))))
+;; Make the image read-write functions accept either Lisp-formatted
+;; data or unsigned-byte arrays for binary I/O.
+
+;; (defun cl-enqueue-read-image (queue image
+;;                               &key
+;;                                 blocking-read-p
+;;                                 origin
+;;                                 (width 1)
+;;                                 (height 1)
+;;                                 (depth 1)
+;;                                 (row-pitch 0)
+;;                                 (slice-pitch 0)
+;;                                 event-wait-list)
+;;   (labels ((indexfirst (i)
+;;              (list (mod i width)
+;;                    (mod (floor i width) height)
+;;                    (floor i (* width height)))))
+;;     (let* ((image-format
+;;             (cl-get-image-info image +CL-IMAGE-FORMAT+))
+;;            (element-size
+;;             (cl-get-image-info image +CL-IMAGE-ELEMENT-SIZE+))
+;;            (total-size (* element-size 
