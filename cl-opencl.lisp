@@ -1417,7 +1417,9 @@ cl-get-program-info and foreign memory management."
   "Sets kernel argument.  If value is NIL, local memory will be
 supplied to the kernel.  Otherwise, the value will be assumed to be of
 foreign type.  Size is determined by the type and count unless size is
-explicitly specified."
+explicitly specified.  Note that count only has meaning when value is
+not supplied and therefore only matters when allocating local memory
+as a kernel argument."
   (when (not (or value size))
     (error "Must set value or size in cl-set-kernel-arg"))
   (let* ((size (if size
@@ -1670,6 +1672,8 @@ reasonable values per param value.
 
 ;; Event Object APIs
 (defun cl-wait-for-events (events)
+  "Waits for events and returns input event list for possible
+release."
   (let* ((n (length events)))
     (with-foreign-object (evs 'cl-event n)
       (loop
@@ -1679,7 +1683,13 @@ reasonable values per param value.
                   ev))
       (check-opencl-error () ()
         (clWaitForEvents n
-                         evs)))))
+                         evs))
+      events)))
+
+(defun cl-wait-and-release-events (events)
+  "Waits for and releases events once they have completed."
+  (mapcar #'cl-release-event
+          (cl-wait-for-events events)))
 
 (defun cl-get-event-info (event param)
   (let* ((type
@@ -2770,10 +2780,10 @@ of (unsigned-byte 8) data matching the size of the image.
 
 There are two modes of operation: Synchronous and asynchronous.
 
-blocking-p non-NIL: Synchronous operation.  Result is returned
-directly.  blocking-p NIL: Asynchronous operation.  Result is a
-list of an event and a function to call which will return the
-previously mentioned array of formatted data.
+blocking-p non-NIL: Synchronous operation.  Result is NIL.
+
+blocking-p NIL: Asynchronous operation.  Result is a list of an event
+and a function to call which will cleanup foreign memory.
 
 origin can be a list of three pixel indices (x y z) denoting the
 starting point for reading from the image.  Default value is (0 0 0).
@@ -2945,13 +2955,13 @@ entire image."
                                 region
                                 event-wait-list)
   "Enqueues a fill command into the image buffer.  Pixel data input
-must either pixel->lisp formatted data matching the channel dimensions
-of the image, or if bytes-p is non-NIL, an array of (unsigned-byte 8)
-data matching the size of a single pixel.
+must be either a single floating-point number or a 4-element list of
+either floats or integers depending on the channel type.  See
+clEnqueueFillImage OpenCL documentation for rules on when to use
+integers or floats.
 
 There is only one mode: Asynchronous operation.  Result is a list of
-an event and a function to call which will return the previously
-mentioned array of formatted data.
+an event and a function to call which will cleanup foreign memory.
 
 origin can be a list of three pixel indices (x y z) denoting the
 starting point for reading from the image.  Default value is (0 0 0).
@@ -3091,5 +3101,571 @@ entire image."
                                 dst-origin
                                 region
                                 event-wait-list)
-  )
-                              
+  "Enqueues an image copy command.  Asynchronous operation only.
+Return value is event for copy completion.
+
+region can be a list (width height depth).  If not supplied, default
+is entire source image.
+
+src-origin and dst-origin are source and destination origins to be
+read or write respectively.
+
+event-wait-list can be a list of events which the copy command is
+dependent on."
+  (flet ((minone (x)
+           (if (zerop x)
+               1
+               x)))
+    (let* ((src-origin (if src-origin
+                           src-origin
+                           (list 0 0 0)))
+           (src-origin-ptr (let* ((res
+                                   (foreign-alloc 'size-t :count 3)))
+                             (loop
+                                for i below 3
+                                for x in src-origin
+                                do (setf (mem-aref res 'size-t i)
+                                         x))
+                             res))
+           (dst-origin (if dst-origin
+                           dst-origin
+                           (list 0 0 0)))
+           (dst-origin-ptr (let* ((res
+                                   (foreign-alloc 'size-t :count 3)))
+                             (loop
+                                for i below 3
+                                for x in dst-origin
+                                do (setf (mem-aref res 'size-t i)
+                                         x))
+                             res))
+           (width (minone
+                   (if region
+                       (first region)
+                       (cl-get-image-info src-image +cl-image-width+))))
+           (height (minone
+                    (if region
+                        (second region)
+                        (cl-get-image-info src-image +cl-image-height+))))
+           (depth (minone
+                   (if region
+                       (third region)
+                       (cl-get-image-info src-image +cl-image-depth+))))
+           (region (list width height depth))
+           (region-ptr (let* ((res
+                               (foreign-alloc 'size-t :count 3)))
+                         (loop
+                            for x in region
+                            for i from 0
+                            do (setf (mem-aref res 'size-t i)
+                                     x))
+                         res))
+           (ewl (if event-wait-list
+                    (let* ((res
+                            (foreign-alloc 'cl-event
+                                           :count (length event-wait-list))))
+                      (loop
+                         for ev in event-wait-list
+                         for i from 0
+                         do (setf (mem-aref res 'cl-event i)
+                                  ev))
+                      res)
+                    +NULL+)))
+      (labels ((cleanup ()
+                 (when event-wait-list
+                   (foreign-free ewl))
+                 (foreign-free src-origin-ptr)
+                 (foreign-free dst-origin-ptr)
+                 (foreign-free region-ptr)))
+        (with-foreign-object (event 'cl-event)
+          (check-opencl-error () #'cleanup
+            (clEnqueueCopyImage queue
+                                src-image
+                                dst-image
+                                src-origin-ptr
+                                dst-origin-ptr
+                                region-ptr
+                                (if event-wait-list
+                                    (length event-wait-list)
+                                    0)
+                                ewl
+                                event))
+          (cleanup)
+          (mem-ref event 'cl-event))))))
+
+(defun cl-enqueue-copy-image-to-buffer (queue src-image dst-buffer
+                                        &key
+                                          src-origin
+                                          (dst-offset 0)
+                                          region
+                                          event-wait-list)
+  "Enqueues an image copy to buffer command.  Asynchronous operation only.
+Return value is event for copy completion.
+
+region can be a list (width height depth).  If not supplied, default
+is entire source image.
+
+src-origin is the origin for the image read.
+
+dst-offset is the offset for the buffer write.
+
+event-wait-list can be a list of events which the copy command is
+dependent on."
+  (flet ((minone (x)
+           (if (zerop x)
+               1
+               x)))
+    (let* ((src-origin (if src-origin
+                           src-origin
+                           (list 0 0 0)))
+           (src-origin-ptr (let* ((res
+                                   (foreign-alloc 'size-t :count 3)))
+                             (loop
+                                for i below 3
+                                for x in src-origin
+                                do (setf (mem-aref res 'size-t i)
+                                         x))
+                             res))
+           (width (minone
+                   (if region
+                       (first region)
+                       (cl-get-image-info src-image +cl-image-width+))))
+           (height (minone
+                    (if region
+                        (second region)
+                        (cl-get-image-info src-image +cl-image-height+))))
+           (depth (minone
+                   (if region
+                       (third region)
+                       (cl-get-image-info src-image +cl-image-depth+))))
+           (region (list width height depth))
+           (region-ptr (let* ((res
+                               (foreign-alloc 'size-t :count 3)))
+                         (loop
+                            for x in region
+                            for i from 0
+                            do (setf (mem-aref res 'size-t i)
+                                     x))
+                         res))
+           (ewl (if event-wait-list
+                    (let* ((res
+                            (foreign-alloc 'cl-event
+                                           :count (length event-wait-list))))
+                      (loop
+                         for ev in event-wait-list
+                         for i from 0
+                         do (setf (mem-aref res 'cl-event i)
+                                  ev))
+                      res)
+                    +NULL+)))
+      (labels ((cleanup ()
+                 (when event-wait-list
+                   (foreign-free ewl))
+                 (foreign-free src-origin-ptr)
+                 (foreign-free region-ptr)))
+        (with-foreign-object (event 'cl-event)
+          (check-opencl-error () #'cleanup
+            (clEnqueueCopyImageToBuffer queue
+                                        src-image
+                                        dst-buffer
+                                        src-origin-ptr
+                                        region-ptr
+                                        dst-offset
+                                        (if event-wait-list
+                                            (length event-wait-list)
+                                            0)
+                                        ewl
+                                        event))
+          (cleanup)
+          (mem-ref event 'cl-event))))))
+
+(defun cl-enqueue-copy-buffer-to-image (queue src-buffer dst-image
+                                        &key
+                                          (src-offset 0)
+                                          dst-origin
+                                          region
+                                          event-wait-list)
+  "Enqueues a buffer copy to image command.  Asynchronous operation only.
+Return value is event for copy completion.
+
+region can be a list (width height depth).  If not supplied, default
+is entire destination image.
+
+src-offset is the offset for the buffer read.
+
+dst-origin is the origin for the image write.
+
+event-wait-list can be a list of events which the copy command is
+dependent on."
+  (flet ((minone (x)
+           (if (zerop x)
+               1
+               x)))
+    (let* ((dst-origin (if dst-origin
+                           dst-origin
+                           (list 0 0 0)))
+           (dst-origin-ptr (let* ((res
+                                   (foreign-alloc 'size-t :count 3)))
+                             (loop
+                                for i below 3
+                                for x in dst-origin
+                                do (setf (mem-aref res 'size-t i)
+                                         x))
+                             res))
+           (width (minone
+                   (if region
+                       (first region)
+                       (cl-get-image-info dst-image +cl-image-width+))))
+           (height (minone
+                    (if region
+                        (second region)
+                        (cl-get-image-info dst-image +cl-image-height+))))
+           (depth (minone
+                   (if region
+                       (third region)
+                       (cl-get-image-info dst-image +cl-image-depth+))))
+           (region (list width height depth))
+           (region-ptr (let* ((res
+                               (foreign-alloc 'size-t :count 3)))
+                         (loop
+                            for x in region
+                            for i from 0
+                            do (setf (mem-aref res 'size-t i)
+                                     x))
+                         res))
+           (ewl (if event-wait-list
+                    (let* ((res
+                            (foreign-alloc 'cl-event
+                                           :count (length event-wait-list))))
+                      (loop
+                         for ev in event-wait-list
+                         for i from 0
+                         do (setf (mem-aref res 'cl-event i)
+                                  ev))
+                      res)
+                    +NULL+)))
+      (labels ((cleanup ()
+                 (when event-wait-list
+                   (foreign-free ewl))
+                 (foreign-free dst-origin-ptr)
+                 (foreign-free region-ptr)))
+        (with-foreign-object (event 'cl-event)
+          (check-opencl-error () #'cleanup
+            (clEnqueueCopyBufferToImage queue
+                                        src-buffer
+                                        dst-image
+                                        src-offset
+                                        dst-origin-ptr
+                                        region-ptr
+                                        (if event-wait-list
+                                            (length event-wait-list)
+                                            0)
+                                        ewl
+                                        event))
+          (cleanup)
+          (mem-ref event 'cl-event))))))
+
+(defun cl-enqueue-map-buffer (queue buffer flags size
+                              &key
+                                blocking-p
+                                (offset 0)
+                                event-wait-list)
+  (let* ((ewl (if event-wait-list
+                  (let* ((res
+                          (foreign-alloc 'cl-event
+                                         :count (length event-wait-list))))
+                    (loop
+                       for ev in event-wait-list
+                       for i from 0
+                       do (setf (mem-aref res 'cl-event i)
+                                ev))
+                    res)
+                  +NULL+)))
+    (labels ((cleanup ()
+               (when event-wait-list
+                 (foreign-free ewl))))
+      (with-foreign-object (event 'cl-event)
+        (if blocking-p
+            (let* ((result
+                    (check-opencl-error err #'cleanup
+                      (clEnqueueMapBuffer queue
+                                          buffer
+                                          +CL-TRUE+
+                                          (join-flags flags)
+                                          offset
+                                          size
+                                          (if event-wait-list
+                                              (length event-wait-list)
+                                              0)
+                                          ewl
+                                          event
+                                          err))))
+              (cleanup)
+              result)
+            (let* ((result
+                    (check-opencl-error err #'cleanup
+                      (clEnqueueMapBuffer queue
+                                          buffer
+                                          +CL-FALSE+
+                                          (join-flags flags)
+                                          offset
+                                          size
+                                          (if event-wait-list
+                                              (length event-wait-list)
+                                              0)
+                                          ewl
+                                          event
+                                          err))))
+              (cleanup)
+              (list (mem-ref event 'cl-event)
+                    result)))))))
+
+(defun cl-enqueue-map-image (queue image flags
+                             &key
+                               blocking-p
+                               origin
+                               region
+                               event-wait-list)
+  "Enqueues an image map to buffer command.  Synchronous or
+asynchronous operation controlled by blocking-p.  Return value is:
+
+Synchronous: List (pointer row-pitch slice-pitch)
+
+Asynchronous: List (event pointer row-pitch slice-pitch) where event
+is for map operation completion.
+
+region can be a list (width height depth).  If not supplied, default
+is entire source image.
+
+origin is the origin for the image.
+
+event-wait-list can be a list of events which the copy command is
+dependent on."
+  (flet ((minone (x)
+           (if (zerop x)
+               1
+               x)))
+    (let* ((origin (if origin
+                       origin
+                       (list 0 0 0)))
+           (origin-ptr (let* ((res
+                               (foreign-alloc 'size-t :count 3)))
+                         (loop
+                            for i below 3
+                            for x in origin
+                            do (setf (mem-aref res 'size-t i)
+                                     x))
+                         res))
+           (row-pitch-ptr (foreign-alloc 'size-t))
+           (slice-pitch-ptr (foreign-alloc 'size-t))
+           (width (minone
+                   (if region
+                       (first region)
+                       (cl-get-image-info image +cl-image-width+))))
+           (height (minone
+                    (if region
+                        (second region)
+                        (cl-get-image-info image +cl-image-height+))))
+           (depth (minone
+                   (if region
+                       (third region)
+                       (cl-get-image-info image +cl-image-depth+))))
+           (region (list width height depth))
+           (region-ptr (let* ((res
+                               (foreign-alloc 'size-t :count 3)))
+                         (loop
+                            for x in region
+                            for i from 0
+                            do (setf (mem-aref res 'size-t i)
+                                     x))
+                         res))
+           (ewl (if event-wait-list
+                    (let* ((res
+                            (foreign-alloc 'cl-event
+                                           :count (length event-wait-list))))
+                      (loop
+                         for ev in event-wait-list
+                         for i from 0
+                         do (setf (mem-aref res 'cl-event i)
+                                  ev))
+                      res)
+                    +NULL+)))
+      (labels ((cleanup ()
+                 (when event-wait-list
+                   (foreign-free ewl))
+                 (foreign-free row-pitch-ptr)
+                 (foreign-free slice-pitch-ptr)
+                 (foreign-free origin-ptr)
+                 (foreign-free region-ptr)))
+        (if blocking-p
+            (let* ((result
+                    (check-opencl-error err #'cleanup
+                      (clEnqueueMapImage queue
+                                         image
+                                         +CL-FALSE+
+                                         (join-flags flags)
+                                         origin-ptr
+                                         region-ptr
+                                         row-pitch-ptr
+                                         slice-pitch-ptr
+                                         (if event-wait-list
+                                             (length event-wait-list)
+                                             0)
+                                         ewl
+                                         +NULL+
+                                         err)))
+                   (row-pitch (mem-ref row-pitch-ptr 'size-t))
+                   (slice-pitch (mem-ref slice-pitch-ptr 'size-t)))
+              (cleanup)
+              (list result row-pitch slice-pitch))
+            (with-foreign-object (event 'cl-event)
+              (let* ((result
+                      (check-opencl-error err #'cleanup
+                        (clEnqueueMapImage queue
+                                           image
+                                           +CL-FALSE+
+                                           (join-flags flags)
+                                           origin-ptr
+                                           region-ptr
+                                           row-pitch-ptr
+                                           slice-pitch-ptr
+                                           (if event-wait-list
+                                               (length event-wait-list)
+                                               0)
+                                           ewl
+                                           event
+                                           err)))
+                     (row-pitch (mem-ref row-pitch-ptr 'size-t))
+                     (slice-pitch (mem-ref slice-pitch-ptr 'size-t)))
+                (cleanup)
+                (list (mem-ref event 'cl-event)
+                      result
+                      row-pitch
+                      slice-pitch))))))))
+
+(defun cl-enqueue-unmap-mem-object (queue obj map-ptr
+                                    &key
+                                      event-wait-list)
+  "Enqueues unmapping obj which was mapped to map-ptr.  Asynchronous
+operation only.  Return value is an event for operation completion."
+  (let* ((ewl (if event-wait-list
+                  (foreign-alloc 'cl-event :count (length event-wait-list))
+                  +NULL+)))
+    (labels ((cleanup ()
+               (when event-wait-list
+                 (foreign-free ewl))))
+      (with-foreign-object (event 'cl-event)
+        (check-opencl-error () #'cleanup
+          (clEnqueueUnmapMemObject queue
+                                   obj
+                                   map-ptr
+                                   (if event-wait-list
+                                       (length event-wait-list)
+                                       0)
+                                   ewl
+                                   event))
+        (cleanup)
+        (mem-ref event 'cl-event)))))
+
+(defun cl-enqueue-migrate-mem-objects (queue objects flags
+                                       &key
+                                         event-wait-list)
+  "Enqueues migration of memory objects to the device associated with
+the supplied command queue.  Return value is an event for command
+completion."
+  (let* ((ewl (if event-wait-list
+                  (foreign-alloc 'cl-event :count (length event-wait-list))
+                  +NULL+)))
+    (with-foreign-object (objects-ptr 'cl-mem (length objects))
+      (loop
+         for x in objects
+         for i from 0
+         do (setf (mem-aref objects-ptr 'cl-mem i)
+                  x))
+      (labels ((cleanup ()
+                 (when event-wait-list
+                   (foreign-free ewl))))
+        (with-foreign-object (event 'cl-event)
+          (check-opencl-error () #'cleanup
+            (clEnqueueMigrateMemObjects queue
+                                        (length objects)
+                                        objects-ptr
+                                        (join-flags flags)
+                                        (if event-wait-list
+                                            (length event-wait-list)
+                                            0)
+                                        ewl
+                                        event))
+          (cleanup)
+          (mem-ref event 'cl-event))))))
+
+(defun cl-enqueue-ndrange-kernel (queue kernel
+                                  global-work-size
+                                  local-work-size
+                                  &key
+                                    global-work-offset
+                                    event-wait-list)
+  "Enqueues a data-parallel kernel for execution.  global-work-size
+and local-work-size must be lists that share dimensionality, and if
+supplied, so must global-work-offset.
+
+global-work-offset can denote a non-default offset for the global ID
+of each thread.
+
+Return value is an event for kernel execution completion."
+  (let* ((ndims (length global-work-size))
+         (ewl (if event-wait-list
+                  (foreign-alloc 'cl-event :count (length event-wait-list))
+                  +NULL+))
+         (global-work-size-ptr
+          (let* ((res
+                  (foreign-alloc 'size-t :count ndims)))
+            (loop
+               for x in global-work-size
+               for i from 0
+               do (setf (mem-aref res 'size-t i)
+                        x))
+            res))
+         (local-work-size-ptr
+          (let* ((res
+                  (foreign-alloc 'size-t :count ndims)))
+            (loop
+               for x in local-work-size
+               for i from 0
+               do (setf (mem-aref res 'size-t i)
+                        x))
+            res))
+         (offset-ptr
+          (let* ((res
+                  (foreign-alloc 'size-t :count ndims)))
+            (if global-work-offset
+                (loop
+                   for x in global-work-offset
+                   for i from 0
+                   do (setf (mem-aref res 'size-t i)
+                            x))
+                (loop
+                   for i below ndims
+                   do (setf (mem-aref res 'size-t i)
+                            0)))
+            res)))
+    (labels ((cleanup ()
+               (foreign-free offset-ptr)
+               (foreign-free global-work-size-ptr)
+               (foreign-free local-work-size-ptr)
+               (when event-wait-list
+                 (foreign-free ewl))))
+      (with-foreign-object (event 'cl-event)
+        (check-opencl-error () #'cleanup
+          (clEnqueueNDRangeKernel queue
+                                  kernel
+                                  ndims
+                                  offset-ptr
+                                  global-work-size-ptr
+                                  local-work-size-ptr
+                                  (if event-wait-list
+                                      (length event-wait-list)
+                                      0)
+                                  ewl
+                                  event))
+        (cleanup)
+        (mem-ref event 'cl-event)))))
