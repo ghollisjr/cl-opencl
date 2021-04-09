@@ -15,7 +15,7 @@ The OpenGL and Direct3D intercommunication libraries are hoped to be
 included in the Lisp wrapper.  It would be nice to make cl-opencl work
 well with cl-opengl as found in Quicklisp.
 
-The test.lisp file shows some examples of how to use the cl-opencl
+The examples.lisp file shows some examples of how to use the cl-opencl
 Lisp wrapper.
 
 IMPLEMENTATION DETAILS:
