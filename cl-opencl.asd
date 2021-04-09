@@ -1,7 +1,8 @@
 (defsystem cl-opencl
   :serial t
-  :description "CFFI wrapper for OpenCL and higher level Lisp API"
+  :description "CFFI for OpenCL and Lisp wrapper API"
   :license "Public Domain"
+  :author "Gary Hollis"
   :defsystem-depends-on (:cffi-grovel)
   :depends-on (:cffi)
   :components
