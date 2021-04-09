@@ -1,6 +1,6 @@
 (in-package :cl-opencl)
 
-;; utility macro
+;; utility macros
 (defmacro check-opencl-error (err cleanup &body body)
   "Macro for automating error management with two modes:
 
@@ -34,6 +34,19 @@ an error.  Useful for preventing memory leaks."
                     `((funcall ,cleanup)))
                 (error "OpenCL Error ~a" ,err))
               ,return-value)))))))
+
+(defmacro case= (term &body forms)
+  "This is in response to issues I currently do not understand when
+trying to use CFFI groveler constant values in a case statement.
+Instead of repetitive cond = tests, I use this macro like a case
+statement."
+  `(cond
+     ,@(loop
+          for f in forms
+          for first = (first f)
+          for body = (rest f)
+          collecting `((= ,first ,term)
+                       ,@body))))
 
 ;; Platform API
 (defun cl-get-platform-ids ()
@@ -490,11 +503,11 @@ constants as parsed by the groveler."
 
 (defun cl-get-command-queue-info (queue param)
   (let* ((type
-          (cond
-            ((= param +CL-QUEUE-CONTEXT+) 'cl-context)
-            ((= param +CL-QUEUE-DEVICE+) 'cl-device-id)
-            ((= param +CL-QUEUE-REFERENCE-COUNT+) 'cl-uint)
-            ((= param +CL-QUEUE-PROPERTIES+)
+          (case= param
+            (+CL-QUEUE-CONTEXT+ 'cl-context)
+            (+CL-QUEUE-DEVICE+ 'cl-device-id)
+            (+CL-QUEUE-REFERENCE-COUNT+ 'cl-uint)
+            (+CL-QUEUE-PROPERTIES+
              'cl-command-queue-properties))))
     (with-foreign-object (result type)
       (check-opencl-error () ()
@@ -601,46 +614,46 @@ integer."
                            err)))))
 
 (defun image-channel-type->data-type (channel-data-type)
-  (cond
-    ((= channel-data-type +CL-SNORM-INT8+)
+  (case= channel-data-type
+    (+CL-SNORM-INT8+
      :char)
-    ((= channel-data-type +CL-SNORM-INT16+)
+    (+CL-SNORM-INT16+
      :short)
-    ((= channel-data-type +CL-UNORM-INT8+)
+    (+CL-UNORM-INT8+
      :uchar)
-    ((= channel-data-type +CL-UNORM-INT16+)
+    (+CL-UNORM-INT16+
      :ushort)
-    ((= channel-data-type +CL-UNORM-SHORT-565+)
+    (+CL-UNORM-SHORT-565+
      :ushort)
-    ((= channel-data-type +CL-UNORM-SHORT-555+)
+    (+CL-UNORM-SHORT-555+
      :ushort)
-    ((= channel-data-type +CL-UNORM-INT-101010+)
+    (+CL-UNORM-INT-101010+
      :uint)
-    ((= channel-data-type +CL-SIGNED-INT8+)
+    (+CL-SIGNED-INT8+
      :char)
-    ((= channel-data-type +CL-SIGNED-INT16+)
+    (+CL-SIGNED-INT16+
      :short)
-    ((= channel-data-type +CL-SIGNED-INT32+)
+    (+CL-SIGNED-INT32+
      :int)
-    ((= channel-data-type +CL-UNSIGNED-INT8+)
+    (+CL-UNSIGNED-INT8+
      :uchar)
-    ((= channel-data-type +CL-UNSIGNED-INT16+)
+    (+CL-UNSIGNED-INT16+
      :ushort)
-    ((= channel-data-type +CL-UNSIGNED-INT32+)
+    (+CL-UNSIGNED-INT32+
      :uint)
-    ((= channel-data-type +CL-HALF-FLOAT+)
+    (+CL-HALF-FLOAT+
      'cl-half)
-    ((= channel-data-type +CL-FLOAT+)
+    (+CL-FLOAT+
      :float)))
 
 (defun cl-create-image (context flags
-                        width
-                        height
                         &key
                           (image-type +CL-MEM-OBJECT-IMAGE2D+)
                           (image-channel-order +CL-RGBA+)
                           (image-channel-data-type +CL-UNSIGNED-INT8+)
-                          (depth 0)
+                          (width 1)
+                          (height 1)
+                          (depth 1)
                           (array-size 1)
                           (row-pitch 0)
                           (slice-pitch 0)
@@ -754,20 +767,20 @@ integer."
         (clGetMemObjectInfo obj param (mem-ref retsize 'size-t)
                             retval +NULL+))
       (let* ((rettype
-              (cond
-                ((= param +CL-MEM-TYPE+)
+              (case= param
+                (+CL-MEM-TYPE+
                  'cl-mem-object-type)
-                ((= param +CL-MEM-FLAGS+)
+                (+CL-MEM-FLAGS+
                  'cl-mem-flags)
-                ((= param +CL-MEM-SIZE+)
+                (+CL-MEM-SIZE+
                  'size-t)
-                ((= param +CL-MEM-HOST-PTR+)
+                (+CL-MEM-HOST-PTR+
                  :pointer)
-                ((= param +CL-MEM-MAP-COUNT+)
+                (+CL-MEM-MAP-COUNT+
                  'cl-uint)
-                ((= param +CL-MEM-REFERENCE-COUNT+)
+                (+CL-MEM-REFERENCE-COUNT+
                  'cl-uint)
-                ((= +CL-MEM-CONTEXT+)
+                (+CL-MEM-CONTEXT+
                  'cl-context))))
         (mem-ref retval rettype)))))
 
@@ -780,23 +793,23 @@ integer."
         (clGetImageInfo image param (mem-ref retsize 'size-t)
                         retval +NULL+))
       (let* ((rettype
-              (cond
-                ((= param +CL-IMAGE-FORMAT+)
-                 'cl-image-format)
-                ((= param +CL-IMAGE-ELEMENT-SIZE+)
+              (case= param
+                (+CL-IMAGE-FORMAT+
+                 '(:struct cl-image-format))
+                (+CL-IMAGE-ELEMENT-SIZE+
                  'size-t)
-                ((= param +CL-IMAGE-ROW-PITCH+)
+                (+CL-IMAGE-ROW-PITCH+
                  'size-t)
-                ((= param +CL-IMAGE-SLICE-PITCH+)
+                (+CL-IMAGE-SLICE-PITCH+
                  'size-t)
-                ((= param +CL-IMAGE-WIDTH+)
+                (+CL-IMAGE-WIDTH+
                  'size-t)
-                ((= param +CL-IMAGE-HEIGHT+)
+                (+CL-IMAGE-HEIGHT+
                  'size-t)
-                ((= param +CL-IMAGE-DEPTH+)
+                (+CL-IMAGE-DEPTH+
                  'size-t)
                 ;; Uncomment this once Windows header is handled
-                ;; ((= +CL-IMAGE-D3D10-SUBRESOURCE-KHR+)
+                ;; (+CL-IMAGE-D3D10-SUBRESOURCE-KHR+
                 ;;  :pointer)
                 )))
         (mem-ref retval rettype)))))
@@ -810,10 +823,10 @@ integer."
         (clGetPipeInfo pipe param (mem-ref retsize 'size-t)
                        retval +NULL+))
       (let* ((rettype
-              (cond
-                ((= param +CL-PIPE-PACKET-SIZE+)
+              (case= param
+                (+CL-PIPE-PACKET-SIZE+
                  'cl-uint)
-                ((= param +CL-PIPE-MAX-PACKETS+)
+                (+CL-PIPE-MAX-PACKETS+
                  'cl-uint))))
         (mem-ref retval rettype)))))
 
@@ -912,16 +925,16 @@ groveler file for this reason."
     (check-opencl-error () ()
       (clGetSamplerInfo sampler param 0 +NULL+ retsize))
     (let* ((rettype
-            (cond
-              ((= param +CL-SAMPLER-REFERENCE-COUNT+)
+            (case= param
+              (+CL-SAMPLER-REFERENCE-COUNT+
                'cl-uint)
-              ((= param +CL-SAMPLER-CONTEXT+)
+              (+CL-SAMPLER-CONTEXT+
                'cl-context)
-              ((= param +CL-SAMPLER-ADDRESSING-MODE+)
+              (+CL-SAMPLER-ADDRESSING-MODE+
                'cl-addressing-mode)
-              ((= param +CL-SAMPLER-FILTER-MODE+)
+              (+CL-SAMPLER-FILTER-MODE+
                'cl-filter-mode)
-              ((= param +CL-SAMPLER-NORMALIZED-COORDS+)
+              (+CL-SAMPLER-NORMALIZED-COORDS+
                'cl-bool))))
       (with-foreign-object (retval :char (mem-ref retsize 'size-t))
         (check-opencl-error () ()
@@ -1287,30 +1300,30 @@ extracting binaries."
         (clGetProgramInfo program param (mem-ref retsize 'size-t)
                           retval
                           +NULL+))
-      (cond
-        ((= param +CL-PROGRAM-REFERENCE-COUNT+)
+      (case= param
+        (+CL-PROGRAM-REFERENCE-COUNT+
          (mem-ref retval 'cl-uint))
-        ((= param +CL-PROGRAM-CONTEXT+)
+        (+CL-PROGRAM-CONTEXT+
          (mem-ref retval 'cl-context))
-        ((= param +CL-PROGRAM-NUM-DEVICES+)
+        (+CL-PROGRAM-NUM-DEVICES+
          (mem-ref retval 'cl-uint))
-        ((= param +CL-PROGRAM-DEVICES+)
+        (+CL-PROGRAM-DEVICES+
          (let* ((ndevices (floor (mem-aref retsize 'size-t)
                                  (foreign-type-size 'cl-device-id))))
            (loop
               for i below ndevices
               collecting (mem-aref retval 'cl-device-id i))))
-        ((= param +CL-PROGRAM-SOURCE+)
+        (+CL-PROGRAM-SOURCE+
          (foreign-string-to-lisp retval))
-        ((= param +CL-PROGRAM-BINARY-SIZES+)
+        (+CL-PROGRAM-BINARY-SIZES+
          (let* ((nbinaries (floor (mem-aref retsize 'size-t)
                                   (foreign-type-size 'size-t))))
            (loop
               for i below nbinaries
               collecting (mem-aref retval 'size-t i))))
-        ((= param +CL-PROGRAM-NUM-KERNELS+)
+        (+CL-PROGRAM-NUM-KERNELS+
          (mem-ref retval 'size-t))
-        ((= param +CL-PROGRAM-KERNEL-NAMES+)
+        (+CL-PROGRAM-KERNEL-NAMES+
          (foreign-string-to-lisp retval))))))
 
 (defun cl-get-program-binaries (program)
@@ -1357,12 +1370,12 @@ cl-get-program-info and foreign memory management."
         (clGetProgramBuildInfo program device param
                                (mem-ref retsize 'size-t)
                                retval +NULL+))
-      (cond
-        ((= param +CL-PROGRAM-BUILD-STATUS+)
+      (case= param
+        (+CL-PROGRAM-BUILD-STATUS+
          (mem-ref retval 'cl-build-status))
-        ((= param +CL-PROGRAM-BUILD-OPTIONS+)
+        (+CL-PROGRAM-BUILD-OPTIONS+
          (foreign-string-to-lisp retval))
-        ((= param +CL-PROGRAM-BUILD-LOG+)
+        (+CL-PROGRAM-BUILD-LOG+
          (foreign-string-to-lisp retval))))))
 
 ;; Kernel API
@@ -1467,18 +1480,18 @@ arguments can be set to adjust both settings simultaneously."
           (clGetKernelInfo kernel param
                            size retval
                            +NULL+))
-        (cond
-          ((= param +CL-KERNEL-FUNCTION-NAME+)
+        (case= param
+          (+CL-KERNEL-FUNCTION-NAME+
            (foreign-string-to-lisp retval))
-          ((= param +CL-KERNEL-NUM-ARGS+)
+          (+CL-KERNEL-NUM-ARGS+
            (mem-ref retval 'cl-uint))
-          ((= param +CL-KERNEL-REFERENCE-COUNT+)
+          (+CL-KERNEL-REFERENCE-COUNT+
            'cl-uint)
-          ((= param +CL-KERNEL-CONTEXT+)
+          (+CL-KERNEL-CONTEXT+
            'cl-context)
-          ((= param +CL-KERNEL-PROGRAM+)
+          (+CL-KERNEL-PROGRAM+
            'cl-program)
-          ((= param +CL-KERNEL-ATTRIBUTES+)
+          (+CL-KERNEL-ATTRIBUTES+
            (foreign-string-to-lisp retval)))))))
 
 (defun cl-get-kernel-arg-info (kernel arg-index param)
@@ -1495,29 +1508,29 @@ arguments can be set to adjust both settings simultaneously."
                               param
                               size retval
                               +NULL+))
-        (cond
-          ((= param +CL-KERNEL-ARG-ADDRESS-QUALIFIER+)
+        (case= param
+          (+CL-KERNEL-ARG-ADDRESS-QUALIFIER+
            (mem-ref retval 'cl-kernel-arg-address-qualifier))
-          ((= param +CL-KERNEL-ARG-ACCESS-QUALIFIER+)
+          (+CL-KERNEL-ARG-ACCESS-QUALIFIER+
            (mem-ref retval 'cl-kernel-arg-access-qualifier))
-          ((= param +CL-KERNEL-ARG-TYPE-NAME+)
+          (+CL-KERNEL-ARG-TYPE-NAME+
            (foreign-string-to-lisp retval))
-          ((= param +CL-KERNEL-ARG-TYPE-QUALIFIER+)
+          (+CL-KERNEL-ARG-TYPE-QUALIFIER+
            (mem-ref retval 'cl-kernel-arg-type-qualifier))
-          ((= param +CL-KERNEL-ARG-NAME+)
+          (+CL-KERNEL-ARG-NAME+
            (foreign-string-to-lisp retval)))))))
 
 (defun cl-get-kernel-work-group-info (kernel device param)
   "Queries kernel for information about running on given device."
   (let* ((type nil)
          (count 1))
-    (cond
-      ((= param +CL-KERNEL-WORK-GROUP-SIZE+)
+    (case= param
+      (+CL-KERNEL-WORK-GROUP-SIZE+
        (setf type 'size-t))
-      ((= param +CL-KERNEL-COMPILE-WORK-GROUP-SIZE+)
+      (+CL-KERNEL-COMPILE-WORK-GROUP-SIZE+
        (setf type 'size-t)
        (setf count 3))
-      ((= param +CL-KERNEL-LOCAL-MEM-SIZE+)
+      (+CL-KERNEL-LOCAL-MEM-SIZE+
        (setf type 'cl-ulong)))
     (with-foreign-object (result type count)
       (check-opencl-error () ()
@@ -1525,14 +1538,14 @@ arguments can be set to adjust both settings simultaneously."
                                   (* count (foreign-type-size type))
                                   result
                                   +NULL+))
-      (cond
-        ((= param +CL-KERNEL-WORK-GROUP-SIZE+)
+      (case= param
+        (+CL-KERNEL-WORK-GROUP-SIZE+
          (mem-ref result 'size-t))
-        ((= param +CL-KERNEL-COMPILE-WORK-GROUP-SIZE+)
+        (+CL-KERNEL-COMPILE-WORK-GROUP-SIZE+
          (loop
             for i below 3
             collecting (mem-aref result 'size-t i)))
-        ((= param +CL-KERNEL-LOCAL-MEM-SIZE+)
+        (+CL-KERNEL-LOCAL-MEM-SIZE+
          (mem-ref result 'cl-uint))))))
 
 (defun cl-get-kernel-sub-group-info (kernel device param
@@ -1545,8 +1558,8 @@ reasonable values per param value.
 +CL-KERNEL-LOCAL-SIZE-FOR-SUB-GROUP-COUNT+: integer.
 +CL-KERNEL-MAX-NUM-SUB-GROUPS+: ignored.
 +CL-KERNEL-COMPILE-NUM-SUB-GROUPS+: ignored."
-  (cond
-    ((= param +CL-KERNEL-MAX-SUB-GROUP-SIZE-FOR-NDRANGE+)
+  (case= param
+    (+CL-KERNEL-MAX-SUB-GROUP-SIZE-FOR-NDRANGE+
      (let* ((ninput (length input)))
        (with-foreign-object (ptr 'size-t ninput)
          (loop
@@ -1571,7 +1584,7 @@ reasonable values per param value.
                                         (mem-ref retsize 'size-t)
                                         retval +NULL+))
              (mem-ref retval 'size-t))))))
-    ((= param +CL-KERNEL-SUB-GROUP-COUNT-FOR-NDRANGE+)
+    (+CL-KERNEL-SUB-GROUP-COUNT-FOR-NDRANGE+
      (let* ((ninput (length input)))
        (with-foreign-object (ptr 'size-t ninput)
          (loop
@@ -1596,7 +1609,7 @@ reasonable values per param value.
                                         (mem-ref retsize 'size-t)
                                         retval +NULL+))
              (mem-ref retval 'size-t))))))
-    ((= param +CL-KERNEL-LOCAL-SIZE-FOR-SUB-GROUP-COUNT+)
+    (+CL-KERNEL-LOCAL-SIZE-FOR-SUB-GROUP-COUNT+
      (with-foreign-objects ((ptr 'size-t)
                             (retsize 'size-t))
        (setf (mem-ref ptr 'size-t) input)
@@ -1618,7 +1631,7 @@ reasonable values per param value.
                                       retval
                                       +NULL+))
            (foreign-array-to-lisp retval (list :array 'size-t nret))))))
-    ((= param +CL-KERNEL-MAX-NUM-SUB-GROUPS+)
+    (+CL-KERNEL-MAX-NUM-SUB-GROUPS+
      (with-foreign-object (retsize 'size-t)
        (check-opencl-error () ()
          (clGetKernelSubGroupInfo kernel device param
@@ -1636,7 +1649,7 @@ reasonable values per param value.
                                     retval
                                     +NULL+))
          (mem-ref retval 'size-t))))
-    ((= param +CL-KERNEL-COMPILE-NUM-SUB-GROUPS+)
+    (+CL-KERNEL-COMPILE-NUM-SUB-GROUPS+
      (with-foreign-object (retsize 'size-t)
        (check-opencl-error () ()
          (clGetKernelSubGroupInfo kernel device param
@@ -1721,16 +1734,16 @@ reasonable values per param value.
 ;; Profiling APIs
 (defun cl-get-event-profiling-info (event param)
   (let* ((type
-          (cond
-            ((= param +CL-PROFILING-COMMAND-QUEUED+)
+          (case= param
+            (+CL-PROFILING-COMMAND-QUEUED+
              'cl-ulong)
-            ((= param +CL-PROFILING-COMMAND-SUBMIT+)
+            (+CL-PROFILING-COMMAND-SUBMIT+
              'cl-ulong)
-            ((= param +CL-PROFILING-COMMAND-START+)
+            (+CL-PROFILING-COMMAND-START+
              'cl-ulong)
-            ((= param +CL-PROFILING-COMMAND-END+)
+            (+CL-PROFILING-COMMAND-END+
              'cl-ulong)
-            ((= param +CL-PROFILING-COMMAND-COMPLETE+)
+            (+CL-PROFILING-COMMAND-COMPLETE+
              'cl-ulong))))
     (with-foreign-object (retsize 'size-t)
       (check-opencl-error () ()
@@ -1759,7 +1772,7 @@ reasonable values per param value.
                                  (offset 0)
                                  make-array-args
                                  event-wait-list
-                                 blocking-read-p)
+                                 blocking-p)
   "Enqueues reading from a buffer in the command queue.  array-type
 should be a CFFI array type denoting how the foreign array data is
 stored, i.e. (:array element-type dim1-size dim2-size ...).
@@ -1767,7 +1780,7 @@ make-array-args will be passed to cffi:foreign-array-to-lisp along
 with the read data and the array-type.  There are 2 main modes of
 operation:
 
-blocking-read-p NIL: Asynchronous read.  cl-enqueue-read-buffer will
+blocking-p NIL: Asynchronous read.  cl-enqueue-read-buffer will
 return a list with two elements: An event handle and a function that
 when called with no arguments will return the data read out of the
 buffer as well as cleaning up allocated foreign memory.  If an error
@@ -1776,7 +1789,7 @@ memory will be freed before signaling an error.  The event handle
 returned will need to eventually have cl-release-event called on it to
 avoid a memory leak.
 
-blocking-read-p non-NIL: Synchronous read.  cl-enqueue-read-buffer will
+blocking-p non-NIL: Synchronous read.  cl-enqueue-read-buffer will
 return the data read out of the buffer.
 
 offset can denote an offset in bytes at which to start reading from
@@ -1812,7 +1825,7 @@ finalizer to avoid a segfault."
                  (cleanupptr)
                  (cleanupewl)))
         (with-foreign-object (event 'cl-event)
-          (if blocking-read-p
+          (if blocking-p
               (progn
                 (check-opencl-error () #'cleanup
                   (clEnqueueReadBuffer queue
@@ -1867,7 +1880,7 @@ finalizer to avoid a segfault."
        (buffer-slice-pitch 0)
        make-array-args
        event-wait-list
-       blocking-read-p)
+       blocking-p)
   "Enqueues rectangular reading from a buffer in the command queue.
 array-type should be a CFFI array type denoting how the foreign array
 data is stored, i.e. (:array element-type dim1-size dim2-size ...).
@@ -1875,7 +1888,7 @@ make-array-args will be passed to cffi:foreign-array-to-lisp along
 with the read data and the array-type.  There are 2 main modes of
 operation:
 
-blocking-read-p NIL: Asynchronous read.  cl-enqueue-read-buffer will
+blocking-p NIL: Asynchronous read.  cl-enqueue-read-buffer will
 return a list with two elements: An event handle and a function that
 when called with no arguments will return the data read out of the
 buffer as well as cleaning up allocated foreign memory.  If an error
@@ -1884,7 +1897,7 @@ memory will be freed before signaling an error.  The event handle
 returned will need to eventually have cl-release-event called on it to
 avoid a memory leak.
 
-blocking-read-p non-NIL: Synchronous read.  cl-enqueue-read-buffer will
+blocking-p non-NIL: Synchronous read.  cl-enqueue-read-buffer will
 return the data read out of the buffer.
 
 buffer-origin can be NIL or a list of 3 elements denoting the 3-D
@@ -1950,7 +1963,7 @@ finalizer to avoid a segfault."
                    (cleanupptr)
                    (cleanupewl)))
           (with-foreign-object (event 'cl-event)
-            (if blocking-read-p
+            (if blocking-p
                 (progn
                   (check-opencl-error () #'cleanup
                     (clEnqueueReadBufferRect queue
@@ -2006,18 +2019,18 @@ finalizer to avoid a segfault."
 
 (defun cl-enqueue-write-buffer (queue buffer element-type data
                                 &key
-                                  blocking-write-p
+                                  blocking-p
                                   (offset 0)
                                   event-wait-list)
   "Enqueues write instructions for the buffer and supplied data.
   There are two modes of operation: blocking and non-blocking.
 
-blocking-write-p is NIL: Asynchronous operation.  Data is queued for
+blocking-p is NIL: Asynchronous operation.  Data is queued for
 writing, but not necessarily written on return.  The return value is a
 list containing an event handle and a cleanup function to free the
 foreign data once the write has completed.
 
-blocking-write-p is non-NIL: Synchronous operation.  The return value
+blocking-p is non-NIL: Synchronous operation.  The return value
 is irrelevant and no foreign memory management is necessary.
 
 element-type should be a CFFI type.
@@ -2056,7 +2069,7 @@ write should occur."
                (cleanupptr)
                (cleanupewl)))
       (with-foreign-object (event 'cl-event)
-        (if blocking-write-p
+        (if blocking-p
             (progn
               (check-opencl-error () #'cleanup
                 (clEnqueueWriteBuffer queue
@@ -2167,10 +2180,10 @@ So for example:
                                        (buffer-row-pitch 0)
                                        (buffer-slice-pitch 0)
                                        event-wait-list
-                                       blocking-write-p)
+                                       blocking-p)
   "Enqueues rectangular write into buffer.  There are two modes of operation:
 
-cl-blocking-write-p NIL: Asynchronous write.  Return value is a list
+blocking-p NIL: Asynchronous write.  Return value is a list
 containing an event handle and a cleanup function to call once the
 event has completed in order to free allocated foreign memory.
 
@@ -2183,7 +2196,7 @@ To control index ordering, call 3D-array->list directly.  Default
 behavior of 3D-array->sequence is :index-mode :first, see function
 documentation.  OpenCL uses :first index convention.
 
-cl-blocking-write-p non-NIL: Synchronous write.  Return value is NIL.
+blocking-p non-NIL: Synchronous write.  Return value is NIL.
 
 buffer-origin can be a list of integers to denote an offset in the
 buffer write destination (see OpenCL documentation), or NIL to denote
@@ -2261,7 +2274,7 @@ bytes, which is computed from element-type."
               height)
         (setf (mem-aref region 'size-t 2)
               depth)
-        (if blocking-write-p
+        (if blocking-p
             (progn
               (check-opencl-error () #'cleanup
                 (clEnqueueWriteBufferRect queue
@@ -2488,16 +2501,12 @@ total amount of data copied."
           (mem-ref event 'cl-event))))))
 
 ;; Parse pixel into Lisp
-(defun pixel->lisp (pixel-ptr format)
-  "Takes foreign data located in pixel-ptr with plist format and
-returns Lisp data suitable for that pixel type.  For 1-channel pixels,
-numerical value is returned.  For multi-channel pixels, a list of
-numerical values is returned."
+(defun format->type-info (format)
   (destructuring-bind (&key image-channel-data-type
                             image-channel-order)
       format
     (let* ((ndims
-            (case image-channel-order
+            (case= image-channel-order
               (+CL-R+ 1)
               (+CL-RX+ 1)
               (+CL-A+ 1)
@@ -2519,71 +2528,568 @@ numerical values is returned."
               (+CL-ABGR+ 4)
               (+CL-DEPTH-STENCIL+ 1)))
            (type (image-channel-type->data-type image-channel-data-type)))
-      (if (= ndims 1)
-          (mem-ref pixel-ptr type)
-          (loop
-             for i below ndims
-             collecting (mem-aref pixel-ptr type i))))))
+      (list ndims type))))
+
+(defun pixel->lisp (pixel-ptr format)
+  "Takes foreign data located in pixel-ptr with plist format and
+returns Lisp data suitable for that pixel type.  For 1-channel pixels,
+numerical value is returned.  For multi-channel pixels, a list of
+numerical values is returned."
+  (destructuring-bind (ndims type)
+      (format->type-info format)
+    (if (= ndims 1)
+        (mem-ref pixel-ptr type)
+        (loop
+           for i below ndims
+           collecting (mem-aref pixel-ptr type i)))))
 
 ;; Lisp to pixel
-(defun lisp->pixel (lisp-pixel ptr format)
+(defun lisp->pixel! (lisp-pixel ptr format)
   "Places pixel data in foreign ptr formatted by plist format and
 using Lisp data lisp-pixel suitable for that pixel type.  1-channel
 pixels use numeric types, and multi-channel pixels use a list of
 numerical values."
-      (destructuring-bind (&key image-channel-data-type
-                                image-channel-order)
-          format
-        (let* ((ndims
-                (case image-channel-order
-                  (+CL-R+ 1)
-                  (+CL-RX+ 1)
-                  (+CL-A+ 1)
-                  (+CL-INTENSITY+ 1)
-                  (+CL-LUMINANCE+ 1)
-                  (+CL-DEPTH+ 1)
-                  (+CL-RG+ 2)
-                  (+CL-RGX+ 2)
-                  (+CL-RA+ 2)
-                  (+CL-RGB+ 3)
-                  (+CL-RGBX+ 3)
-                  (+CL-RGBA+ 4)
-                  (+CL-SRGB+ 3)
-                  (+CL-SRGBX+ 3)
-                  (+CL-SRGBA+ 4)
-                  (+CL-SBGRA+ 4)
-                  (+CL-ARGB+ 4)
-                  (+CL-BGRA+ 4)
-                  (+CL-ABGR+ 4)
-                  (+CL-DEPTH-STENCIL+ 1)))
-               (type (image-channel-type->data-type image-channel-data-type)))
-          (if (= ndims 1)
-              (setf (mem-ref ptr type)
-                    lisp-pixel)
-              (loop
-                 for x in lisp-pixel
-                 for i below ndims
-                 do (setf (mem-aref ptr type i)
-                          x))))))
+  (destructuring-bind (ndims type) (format->type-info format)
+    (if (= ndims 1)
+        (setf (mem-ref ptr type)
+              lisp-pixel)
+        (loop
+           for x in lisp-pixel
+           for i below ndims
+           do (setf (mem-aref ptr type i)
+                    x)))))
+
+;; Byte array to pixel
+(defun bytes->pixel! (byte-array ptr format
+                      &key (start 0))
+  "Places pixel data from an array of (unsigned-byte 8) data at start
+in foreign ptr formatted by plist format and using Lisp data
+lisp-pixel suitable for that pixel type.  1-channel pixels use numeric
+types, and multi-channel pixels use a list of numerical values."
+  (destructuring-bind (ndims type) (format->type-info format)
+    (let* ((size (* (foreign-type-size type) ndims)))
+      (loop
+         for xi from start
+         for i below size
+         do (setf (mem-aref ptr :uchar i)
+                  (aref byte-array xi))))))
+
+(defun pixel->bytes! (ptr format byte-array
+                      &key
+                        (start 0))
+  "Converts pixel data at ptr into (unsigned-byte 8) data and places
+it in byte-array starting at start."
+  (destructuring-bind (ndims type)
+      (format->type-info format)
+    (let* ((size (* ndims (foreign-type-size type))))
+      (loop
+         for i below size
+         for xi from start
+         do (setf (aref byte-array xi)
+                  (mem-aref ptr :uchar i))))))
+
 ;; Make the image read-write functions accept either Lisp-formatted
 ;; data or unsigned-byte arrays for binary I/O.
 
-;; (defun cl-enqueue-read-image (queue image
-;;                               &key
-;;                                 blocking-read-p
-;;                                 origin
-;;                                 (width 1)
-;;                                 (height 1)
-;;                                 (depth 1)
-;;                                 (row-pitch 0)
-;;                                 (slice-pitch 0)
-;;                                 event-wait-list)
-;;   (labels ((indexfirst (i)
-;;              (list (mod i width)
-;;                    (mod (floor i width) height)
-;;                    (floor i (* width height)))))
-;;     (let* ((image-format
-;;             (cl-get-image-info image +CL-IMAGE-FORMAT+))
-;;            (element-size
-;;             (cl-get-image-info image +CL-IMAGE-ELEMENT-SIZE+))
-;;            (total-size (* element-size 
+(defun cl-enqueue-read-image (queue image
+                              &key
+                                bytes-p
+                                blocking-p
+                                origin
+                                region
+                                (row-pitch 0)
+                                (slice-pitch 0)
+                                event-wait-list)
+  "Enqueues a read command into the image buffer.  Image data result
+ is either a 3-D array of pixel->lisp formatted data matching channel
+ dimensions of the image, or if bytes-p is non-NIL, an array
+ of (unsigned-byte 8) data matching the size of the image.
+
+There are two modes of operation: Synchronous and asynchronous.
+
+blocking-p non-NIL: Synchronous operation.  Result is returned
+directly.  blocking-p NIL: Asynchronous operation.  Result is a
+list of an event and a function to call which will return the
+previously mentioned array of formatted data.
+
+origin can be a list of three pixel indices (x y z) denoting the
+starting point for reading from the image.  Default value is (0 0 0).
+
+region can be a list of (width height depth) in pixels denoting the
+region of pixels to read starting at origin.  Default region is the
+entire image."
+  (flet ((minone (x)
+           (if (zerop x)
+               1
+               x)))
+    (let* ((image-format
+            (cl-get-image-info image +CL-IMAGE-FORMAT+))
+           (element-size
+            (cl-get-image-info image +CL-IMAGE-ELEMENT-SIZE+))
+           (origin (if origin
+                       origin
+                       (list 0 0 0)))
+           (origin-ptr (let* ((res
+                               (foreign-alloc 'size-t :count 3)))
+                         (loop
+                            for i below 3
+                            for x in origin
+                            do (setf (mem-aref res 'size-t i)
+                                     x))
+                         res))
+           (width (minone
+                   (if region
+                       (first region)
+                       (cl-get-image-info image +cl-image-width+))))
+           (height (minone
+                    (if region
+                        (second region)
+                        (cl-get-image-info image +cl-image-height+))))
+           (depth (minone
+                   (if region
+                       (third region)
+                       (cl-get-image-info image +cl-image-depth+))))
+           (region (list width height depth))
+           (region-ptr (let* ((res
+                               (foreign-alloc 'size-t :count 3)))
+                         (loop
+                            for x in region
+                            for i from 0
+                            do (setf (mem-aref res 'size-t i)
+                                     x))
+                         res))
+           (total-size (* element-size height width depth))
+           (ptr (foreign-alloc :uchar :count total-size))
+           (ewl (if event-wait-list
+                    (let* ((res
+                            (foreign-alloc 'cl-event
+                                           :count (length event-wait-list))))
+                      (loop
+                         for ev in event-wait-list
+                         for i from 0
+                         do (setf (mem-aref res 'cl-event i)
+                                  ev))
+                      res)
+                    +NULL+)))
+      (labels ((cleanuptmp ()
+                 (when event-wait-list
+                   (foreign-free ewl))
+                 (foreign-free origin-ptr)
+                 (foreign-free region-ptr))
+               (cleanupdata ()
+                 (foreign-free ptr))
+               (cleanup ()
+                 (cleanuptmp)
+                 (cleanupdata))
+               (readbytes ()
+                 (let* ((arr (make-array total-size
+                                         :element-type '(unsigned-byte 8))))
+                   (loop
+                      for i below total-size
+                      do (setf (aref arr i)
+                               (mem-aref ptr :uchar i)))
+                   arr))
+               (readlisp ()
+                 (let* ((arr (make-array (list width height depth))))
+                   (loop
+                      for i below (first region)
+                      do
+                        (loop
+                           for j below (second region)
+                           do
+                             (loop
+                                for k below depth
+                                do
+                                  (let* ((index (+ i
+                                                   (* width j)
+                                                   (* width height k))))
+                                    (setf (aref arr i j k)
+                                          (pixel->lisp
+                                           (mem-aptr ptr :uchar (* index
+                                                                   element-size))
+                                           image-format))))))
+                   arr)))
+        (let* ((readptr (if bytes-p
+                            #'readbytes
+                            #'readlisp)))
+          (if blocking-p
+              (progn
+                (check-opencl-error () #'cleanup
+                  (clEnqueueReadImage queue
+                                      image
+                                      +CL-TRUE+
+                                      origin-ptr
+                                      region-ptr
+                                      row-pitch
+                                      slice-pitch
+                                      ptr
+                                      (if event-wait-list
+                                          (length event-wait-list)
+                                          0)
+                                      ewl
+                                      +NULL+))
+                (let* ((result
+                        (funcall readptr)))
+                  (cleanup)
+                  result))
+              (with-foreign-object (event 'cl-event)
+                (check-opencl-error () #'cleanup
+                  (clEnqueueReadImage queue
+                                      image
+                                      +CL-FALSE+
+                                      origin-ptr
+                                      region-ptr
+                                      row-pitch
+                                      slice-pitch
+                                      ptr
+                                      (if event-wait-list
+                                          (length event-wait-list)
+                                          0)
+                                      ewl
+                                      event))
+                (cleanuptmp)
+                (list (mem-ref event 'cl-event)
+                      (lambda ()
+                        (let* ((result (funcall readptr)))
+                          (cleanupdata)
+                          result))))))))))
+
+(defun cl-enqueue-write-image (queue image data
+                               &key
+                                 bytes-p
+                                 blocking-p
+                                 origin
+                                 region
+                                 (row-pitch 0)
+                                 (slice-pitch 0)
+                                 event-wait-list)
+  "Enqueues a write command into the image buffer.  Image data input
+must either be 3-D array of pixel->lisp formatted data matching the
+channel dimensions of the image, or if bytes-p is non-NIL, an array
+of (unsigned-byte 8) data matching the size of the image.
+
+There are two modes of operation: Synchronous and asynchronous.
+
+blocking-p non-NIL: Synchronous operation.  Result is returned
+directly.  blocking-p NIL: Asynchronous operation.  Result is a
+list of an event and a function to call which will return the
+previously mentioned array of formatted data.
+
+origin can be a list of three pixel indices (x y z) denoting the
+starting point for reading from the image.  Default value is (0 0 0).
+
+region can be a list of (width height depth) in pixels denoting the
+region of pixels to read starting at origin.  Default region is the
+entire image."
+  (flet ((minone (x)
+           (if (zerop x)
+               1
+               x)))
+    (let* ((image-format
+            (cl-get-image-info image +CL-IMAGE-FORMAT+))
+           (element-size
+            (cl-get-image-info image +CL-IMAGE-ELEMENT-SIZE+))
+           (origin (if origin
+                       origin
+                       (list 0 0 0)))
+           (origin-ptr (let* ((res
+                               (foreign-alloc 'size-t :count 3)))
+                         (loop
+                            for i below 3
+                            for x in origin
+                            do (setf (mem-aref res 'size-t i)
+                                     x))
+                         res))
+           (width (minone
+                   (if region
+                       (first region)
+                       (cl-get-image-info image +cl-image-width+))))
+           (height (minone
+                    (if region
+                        (second region)
+                        (cl-get-image-info image +cl-image-height+))))
+           (depth (minone
+                   (if region
+                       (third region)
+                       (cl-get-image-info image +cl-image-depth+))))
+           (region (list width height depth))
+           (region-ptr (let* ((res
+                               (foreign-alloc 'size-t :count 3)))
+                         (loop
+                            for x in region
+                            for i from 0
+                            do (setf (mem-aref res 'size-t i)
+                                     x))
+                         res))
+           (total-size (* element-size height width depth))
+           (ptr (foreign-alloc :uchar :count total-size))
+           (ewl (if event-wait-list
+                    (let* ((res
+                            (foreign-alloc 'cl-event
+                                           :count (length event-wait-list))))
+                      (loop
+                         for ev in event-wait-list
+                         for i from 0
+                         do (setf (mem-aref res 'cl-event i)
+                                  ev))
+                      res)
+                    +NULL+)))
+      (labels ((cleanuptmp ()
+                 (when event-wait-list
+                   (foreign-free ewl))
+                 (foreign-free origin-ptr)
+                 (foreign-free region-ptr))
+               (cleanupdata ()
+                 (foreign-free ptr))
+               (cleanup ()
+                 (cleanuptmp)
+                 (cleanupdata))
+               (writebytes ()
+                 (loop
+                    for i below total-size
+                    do (setf (mem-aref ptr :uchar i)
+                             (aref data i))))
+               (writelisp ()
+                 (loop
+                    for i below (first region)
+                    do
+                      (loop
+                         for j below (second region)
+                         do
+                           (loop
+                              for k below depth
+                              do
+                                (let* ((index (+ i
+                                                 (* width j)
+                                                 (* width height k))))
+                                  (lisp->pixel! (aref data i j k)
+                                                (mem-aptr ptr :uchar (* index
+                                                                        element-size))
+                                                image-format)))))))
+        (if bytes-p
+            (writebytes)
+            (writelisp))
+        (if blocking-p
+            (progn
+              (check-opencl-error () #'cleanup
+                (clEnqueueWriteImage queue
+                                     image
+                                     +CL-TRUE+
+                                     origin-ptr
+                                     region-ptr
+                                     row-pitch
+                                     slice-pitch
+                                     ptr
+                                     (if event-wait-list
+                                         (length event-wait-list)
+                                         0)
+                                     ewl
+                                     +NULL+))
+              (cleanup)
+              nil)
+            (with-foreign-object (event 'cl-event)
+              (check-opencl-error () #'cleanup
+                (clEnqueueWriteImage queue
+                                     image
+                                     +CL-FALSE+
+                                     origin-ptr
+                                     region-ptr
+                                     row-pitch
+                                     slice-pitch
+                                     ptr
+                                     (if event-wait-list
+                                         (length event-wait-list)
+                                         0)
+                                     ewl
+                                     event))
+              (cleanuptmp)
+              (list (mem-ref event 'cl-event)
+                    #'cleanupdata)))))))
+
+(defun fill-image-channel-type->data-type (channel-data-type)
+  (case= channel-data-type
+    (+CL-SNORM-INT8+
+     :float)
+    (+CL-SNORM-INT16+
+     :float)
+    (+CL-UNORM-INT8+
+     :float)
+    (+CL-UNORM-INT16+
+     :float)
+    (+CL-UNORM-SHORT-565+
+     :float)
+    (+CL-UNORM-SHORT-555+
+     :float)
+    (+CL-UNORM-INT-101010+
+     :float)
+    (+CL-SIGNED-INT8+
+     :int)
+    (+CL-SIGNED-INT16+
+     :int)
+    (+CL-SIGNED-INT32+
+     :int)
+    (+CL-UNSIGNED-INT8+
+     :uint)
+    (+CL-UNSIGNED-INT16+
+     :uint)
+    (+CL-UNSIGNED-INT32+
+     :uint)
+    (+CL-HALF-FLOAT+
+     'cl-half)
+    (+CL-FLOAT+
+     :float)))
+
+(defun cl-enqueue-fill-image (queue image pixel-data
+                              &key
+                                origin
+                                region
+                                event-wait-list)
+  "Enqueues a fill command into the image buffer.  Pixel data input
+must either pixel->lisp formatted data matching the channel dimensions
+of the image, or if bytes-p is non-NIL, an array of (unsigned-byte 8)
+data matching the size of a single pixel.
+
+There is only one mode: Asynchronous operation.  Result is a list of
+an event and a function to call which will return the previously
+mentioned array of formatted data.
+
+origin can be a list of three pixel indices (x y z) denoting the
+starting point for reading from the image.  Default value is (0 0 0).
+
+region can be a list of (width height depth) in pixels denoting the
+region of pixels to read starting at origin.  Default region is the
+entire image."
+  (labels ((minone (x)
+             (if (zerop x)
+                 1
+                 x))
+           (format->type-info (format)
+             (destructuring-bind (&key image-channel-data-type
+                                       image-channel-order)
+                 format
+               (let* ((ndims
+                       (case= image-channel-order
+                         (+CL-R+ 1)
+                         (+CL-RX+ 1)
+                         (+CL-A+ 1)
+                         (+CL-INTENSITY+ 1)
+                         (+CL-LUMINANCE+ 1)
+                         (+CL-DEPTH+ 1)
+                         (+CL-RG+ 2)
+                         (+CL-RGX+ 2)
+                         (+CL-RA+ 2)
+                         (+CL-RGB+ 3)
+                         (+CL-RGBX+ 3)
+                         (+CL-RGBA+ 4)
+                         (+CL-SRGB+ 3)
+                         (+CL-SRGBX+ 3)
+                         (+CL-SRGBA+ 4)
+                         (+CL-SBGRA+ 4)
+                         (+CL-ARGB+ 4)
+                         (+CL-BGRA+ 4)
+                         (+CL-ABGR+ 4)
+                         (+CL-DEPTH-STENCIL+ 1)))
+                      (type (fill-image-channel-type->data-type image-channel-data-type)))
+                 (list ndims type))))
+           (lisp->pixel! (lisp-pixel ptr format)
+             ;; Places pixel data in foreign ptr formatted by plist
+             ;; format and using fill-image-channel-type->data-type to
+             ;; convert lisp-pixel.  lisp-pixel is either a floating
+             ;; point number for +CL-DEPTH+, a list of 4 floats for
+             ;; normalized integer channels, or a list of 4 signed or
+             ;; unsigned integers for unnormalized integer channels.
+             (destructuring-bind (ndims type) (format->type-info format)
+               (if (= ndims 1)
+                   (setf (mem-ref ptr type)
+                         lisp-pixel)
+                   (loop
+                      for x in lisp-pixel
+                      for i below ndims
+                      do (setf (mem-aref ptr type i)
+                               x))))))
+    (let* ((image-format
+            (cl-get-image-info image +CL-IMAGE-FORMAT+))
+           (origin (if origin
+                       origin
+                       (list 0 0 0)))
+           (origin-ptr (let* ((res
+                               (foreign-alloc 'size-t :count 3)))
+                         (loop
+                            for i below 3
+                            for x in origin
+                            do (setf (mem-aref res 'size-t i)
+                                     x))
+                         res))
+           (width (minone
+                   (if region
+                       (first region)
+                       (cl-get-image-info image +cl-image-width+))))
+           (height (minone
+                    (if region
+                        (second region)
+                        (cl-get-image-info image +cl-image-height+))))
+           (depth (minone
+                   (if region
+                       (third region)
+                       (cl-get-image-info image +cl-image-depth+))))
+           (region (list width height depth))
+           (region-ptr (let* ((res
+                               (foreign-alloc 'size-t :count 3)))
+                         (loop
+                            for x in region
+                            for i from 0
+                            do (setf (mem-aref res 'size-t i)
+                                     x))
+                         res))
+           ;; technically sometimes too big
+           (ptr (foreign-alloc :uchar :count (* 4 (foreign-type-size :float))))
+           (ewl (if event-wait-list
+                    (let* ((res
+                            (foreign-alloc 'cl-event
+                                           :count (length event-wait-list))))
+                      (loop
+                         for ev in event-wait-list
+                         for i from 0
+                         do (setf (mem-aref res 'cl-event i)
+                                  ev))
+                      res)
+                    +NULL+)))
+      (labels ((cleanuptmp ()
+                 (when event-wait-list
+                   (foreign-free ewl))
+                 (foreign-free origin-ptr)
+                 (foreign-free region-ptr))
+               (cleanupdata ()
+                 (foreign-free ptr))
+               (cleanup ()
+                 (cleanuptmp)
+                 (cleanupdata))
+               (writelisp ()
+                 (lisp->pixel! pixel-data
+                               ptr
+                               image-format)))
+        (writelisp)
+        (with-foreign-object (event 'cl-event)
+          (check-opencl-error () #'cleanup
+            (clEnqueueFillImage queue
+                                image
+                                ptr
+                                origin-ptr
+                                region-ptr
+                                (if event-wait-list
+                                    (length event-wait-list)
+                                    0)
+                                ewl
+                                event))
+          (cleanuptmp)
+          (list (mem-ref event 'cl-event)
+                #'cleanupdata))))))
+
+(defun cl-enqueue-copy-image (queue src-image dst-image
+                              &key
+                                src-origin
+                                dst-origin
+                                region
+                                event-wait-list)
+  )
+                              
