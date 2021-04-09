@@ -374,7 +374,9 @@ In all cases, a list of device IDs will be returned."
   "Creates context from platform and list of devices.  Currently
 properties isn't used as OpenCL does not support any properties aside
 from the platform ID already specified as another argument, but it's
-kept here for future purposes."
+kept here for future purposes.
+
+callback must be a function pointer, e.g. (callback somefunction)."
   (declare (ignore properties)) ; up to OpenCL 2.2 at least
   (let* ((ndevices (length devices)))
     (with-foreign-objects ((devices-pointer 'cl-device-id ndevices)
@@ -1156,7 +1158,8 @@ listed.  If header-programs is supplied, then header-names needs to
 contain the names of each of the header-programs as referred to in the
 program source code.  When supplied, user-data should be a foreign
 pointer to data used by the callback function, which should be defined
-using cffi:defcallback."
+using cffi:defcallback.  Note that the function pointer of the
+callback must be supplied, not the callback name."
   (let* ((ndevs (length devices))
          (opt-ptr +NULL+)
          (nheaders 0)
@@ -1229,9 +1232,9 @@ using cffi:defcallback."
                           callback
                           user-data)
   "Links programs into executables for devices.  programs must be a
-list of programs to include in the executable.  callback can be a
-cffi:defcallback return value, and user-data can be a foreign pointer
-to data supplied to that callback."
+list of programs to include in the executable.  callback can be a the
+function pointer to a callback defined via cffi:defcallback, and
+user-data can be a foreign pointer to data supplied to that callback."
   (let* ((ndevs (length devices))
          (ninputs 0)
          (opt-ptr +NULL+)
@@ -1271,9 +1274,9 @@ to data supplied to that callback."
 (defun cl-set-program-release-callback (program callback
                                         &key
                                           (user-data +NULL+))
-  "Sets release callback for program.  callback must be a return value
-of cffi:defcallback.  user-data can be a pointer to foreign data given
-to the callback."
+  "Sets release callback for program.  callback must be a function
+pointer to a callback defined via cffi:defcallback.  user-data can be
+a pointer to foreign data given to the callback."
   (check-opencl-error () ()
     (clSetProgramReleaseCallback program callback user-data)))
 
@@ -3669,3 +3672,91 @@ Return value is an event for kernel execution completion."
                                   event))
         (cleanup)
         (mem-ref event 'cl-event)))))
+
+;; NOTE: Native kernels not supported in high-level API at the moment,
+;; but the function would be defined here if they are supported
+;; eventually.
+
+(defun cl-enqueue-marker
+    (queue
+     &key
+       event-wait-list
+       (event-p T))
+  "Enqueues marker with optional event wait list.  With NIL
+event-wait-list, the enqueued command waits until all previous
+commands have finished.  An event is returned which identifies this
+marker unless event-p is NIL."
+  (let* ((event (if event-p
+                    (foreign-alloc 'cl-event)
+                    +NULL+))
+         (ewl
+          (if event-wait-list
+              (let* ((res
+                      (foreign-alloc 'cl-event
+                                     :count (length event-wait-list))))
+                (loop
+                   for ev in event-wait-list
+                   for i from 0
+                   do (setf (mem-aref ev 'cl-event i)
+                            ev))
+                res)
+              +NULL+)))
+    (labels ((cleanup ()
+               (when event-p
+                 (foreign-free event))
+               (when event-wait-list
+                 (foreign-free ewl))))
+      (check-opencl-error () #'cleanup
+        (clEnqueueMarkerWithWaitList queue
+                                     (if event-wait-list
+                                         (length event-wait-list)
+                                         0)
+                                     ewl
+                                     event))
+      (let* ((result
+              (when event-p
+                (mem-ref event 'cl-event))))
+        (cleanup)
+        result))))
+
+(defun cl-enqueue-barrier
+    (queue
+     &key
+       event-wait-list
+       (event-p T))
+  "Enqueues barrier with optional event wait list.  With NIL
+event-wait-list, the enqueued command waits until all previous
+commands have finished.  An event is returned which identifies this
+marker unless event-p is NIL."
+  (let* ((event (if event-p
+                    (foreign-alloc 'cl-event)
+                    +NULL+))
+         (ewl
+          (if event-wait-list
+              (let* ((res
+                      (foreign-alloc 'cl-event
+                                     :count (length event-wait-list))))
+                (loop
+                   for ev in event-wait-list
+                   for i from 0
+                   do (setf (mem-aref ev 'cl-event i)
+                            ev))
+                res)
+              +NULL+)))
+    (labels ((cleanup ()
+               (when event-p
+                 (foreign-free event))
+               (when event-wait-list
+                 (foreign-free ewl))))
+      (check-opencl-error () #'cleanup
+        (clEnqueueBarrierWithWaitList queue
+                                      (if event-wait-list
+                                          (length event-wait-list)
+                                          0)
+                                      ewl
+                                      event))
+      (let* ((result
+              (when event-p
+                (mem-ref event 'cl-event))))
+        (cleanup)
+        result))))

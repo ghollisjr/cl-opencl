@@ -3,7 +3,22 @@ Common Lisp software.
 
 cl-opencl is in the public domain; use it for whatever.
 
-IMPLEMENTATION LIMITATIONS:
+OVERVIEW:
+
+cl-opencl has two layers: The low-level CFFI API, and a high-level
+Lisp wrapper.  The Lisp wrapper does not support functions marked as
+deprecated, but those deprecated functions have almost always been
+effectively included in the Lisp API due to flexible keyword
+arguments.
+
+The OpenGL and Direct3D intercommunication libraries are hoped to be
+included in the Lisp wrapper.  It would be nice to make cl-opencl work
+well with cl-opengl as found in Quicklisp.
+
+The test.lisp file shows some examples of how to use the cl-opencl
+Lisp wrapper.
+
+IMPLEMENTATION DETAILS:
 
 * The vector types are implemented as unions with anonymous structs in
   C, and I have no idea how to make that work with CFFI.  I used
@@ -17,3 +32,9 @@ IMPLEMENTATION LIMITATIONS:
 * Some constant values for infinity and not-a-number are omitted
   because the groveler fails to interpret them numerically and just
   reads strings "inf" or "nan" and complains that they're not numbers.
+
+* Native kernels are not included in the high-level API at the moment,
+  as I'm not entirely sure what the best way to enable them would look
+  like.  It's still possible to use them with the CFFI function
+  clEnqueueNativeKernel, you'll just have to manage foreign memory
+  manually.

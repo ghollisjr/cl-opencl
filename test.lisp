@@ -244,7 +244,7 @@ void mandelbrot(__global float* boundaries,
         (cl-release-program program)
         (cl-release-context context)
         (write-ppm picture-output-pathname
-                   (- (* 256 256) 1)
+                   (1- (* 256 256))
                    width
                    height
                    imdata)))))
