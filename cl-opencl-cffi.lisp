@@ -3,7 +3,8 @@
 (defparameter +NULL+ (cffi:null-pointer))
 
 (define-foreign-library opencl
-  (:unix (:or "libOpenCL.so")))
+  (:unix "libOpenCL.so")
+  (t (:default "libOpenCL")))
 
 (use-foreign-library opencl)
 
