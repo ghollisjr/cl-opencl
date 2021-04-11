@@ -37,12 +37,9 @@ The OpenGL and Direct3D intercommunication libraries are hoped to be
 included in the Lisp wrapper.  It would be nice to make cl-opencl work
 well with cl-opengl as found in Quicklisp.
 
-The examples.lisp file shows some examples of how to use the cl-opencl
-Lisp wrapper.
-
 EXAMPLES:
 
-The examples.lisp file contains a number of examples, including a
+The examples directory contains a number of examples, including a
 Mandelbrot fractal PNM image generator.  Here's a trivial example that
 sets the indices of an array using an OpenCL kernel on the first
 available OpenCL device.
