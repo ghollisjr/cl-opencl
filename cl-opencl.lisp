@@ -554,18 +554,23 @@ cl-create-command-queue."
                          &key
                            size
                            type
+                           count
                            data)
   "Creates buffer with two main modes of operation:
 
 1. Size-based.
 2. Data-based.
 
-For size-based, set size to the number of bytes to allocate in the
-buffer.  Note that data is ignored when size is specified as it can be
-calculated when data is supplied.  For data-based, set type and data
-to the foreign type and a list of data to place into the buffer.  Note
-that this means initializing the buffer with data requires the
-data-based option.
+For size-based, either set size to the number of bytes to allocate in
+the buffer, or set type and count to match the number of elements
+available in the buffer of a given type.  Note that data is ignored
+when size or count are specified as it will be calculated when data is
+supplied.  To partially fill space with data, create the buffer and
+then write to the buffer as separate queue commands.
+
+For data-based, set type and data to the foreign type and a list of
+data to place into the buffer.  Note that this means initializing the
+buffer with data requires the data-based option.
 
 Only one of these should be used, and the size-based mode takes
 precedence.  If neither are used, then an error is thrown.
@@ -573,16 +578,21 @@ precedence.  If neither are used, then an error is thrown.
 flags should be a list of flags to join with logior or a single
 integer."
   (when (not (or size
+                 (and type count)
                  (and type data)))
-    (error "Must set either size or type and data to non-NIL values."))
+    (error "Must set either size, type and count, or type and data to non-NIL values."))
   (let* ((mode (join-flags flags)))
-    (if size
-        (check-opencl-error err ()
-          (clCreateBuffer context
-                          mode
-                          size
-                          +NULL+
-                          err))
+    (if (or size count)
+        (let* ((size (if size
+                         size
+                         (* (foreign-type-size type)
+                            count))))
+          (check-opencl-error err ()
+            (clCreateBuffer context
+                            mode
+                            size
+                            +NULL+
+                            err)))
         (let* ((ndata (length data))
                (size (* (foreign-type-size type)
                         ndata)))
@@ -2038,6 +2048,8 @@ finalizer to avoid a segfault."
   "Enqueues write instructions for the buffer and supplied data.
   There are two modes of operation: blocking and non-blocking.
 
+data is a sequence of data to write into the buffer.
+
 blocking-p is NIL: Asynchronous operation.  Data is queued for
 writing, but not necessarily written on return.  The return value is a
 list containing an event handle and a cleanup function to free the
@@ -2068,11 +2080,11 @@ write should occur."
                             x))
                 res)
               +NULL+)))
-    (loop
-       for d in data
-       for i from 0
-       do (setf (mem-aref ptr element-type i)
-                d))
+    (let ((index 0))
+      (map nil (lambda (d)
+                 (setf (mem-aref ptr element-type (1- (incf index)))
+                       d))
+           data))
     (labels ((cleanupptr ()
                (foreign-free ptr))
              (cleanupewl ()
@@ -2200,14 +2212,15 @@ blocking-p NIL: Asynchronous write.  Return value is a list
 containing an event handle and a cleanup function to call once the
 event has completed in order to free allocated foreign memory.
 
-data should be a list or a 3-D array.  If data is a 3-D array, then
-width-height-depth will be set to match the array.  If data is a list,
-then the width-height-depth parameters should match the number of
-elements in the list.  The 3D-array->list utility function will be
-used to convert a 3-D array into a list if a 3-D array is supplied.
-To control index ordering, call 3D-array->list directly.  Default
-behavior of 3D-array->sequence is :index-mode :first, see function
-documentation.  OpenCL uses :first index convention.
+data should be a sequence or a 3-D array.  If data is a 3-D array,
+then width-height-depth will be set to match the array.  If data is a
+sequence, then the width-height-depth parameters should match the
+number of elements in the sequence.  The 3D-array->list utility
+function will be used to convert a 3-D array into a list before
+exporting to foreign memory if a 3-D array is supplied.  To control
+index ordering, call 3D-array->list directly or supply a sequence.
+Default behavior of 3D-array->sequence is :index-mode :first, see
+function documentation.  OpenCL uses :first index convention.
 
 blocking-p non-NIL: Synchronous write.  Return value is NIL.
 
@@ -2221,9 +2234,9 @@ bytes, which is computed from element-type."
   (let* ((data (if (typep data 'sequence)
                    (sequence->3D-array data width height depth)
                    data))
-         (datalist (if (listp data)
-                       data
-                       (3D-array->list data)))
+         (dataseq (if (typep data 'sequence)
+                      data
+                      (3D-array->list data)))
          (width (if (listp data)
                     width
                     (first (array-dimensions data))))
@@ -2231,15 +2244,15 @@ bytes, which is computed from element-type."
                      height
                      (second (array-dimensions data))))
          (depth (if (listp data)
-                    data
+                    depth
                     (third (array-dimensions data))))
          (ptr (let* ((res
-                      (foreign-alloc element-type :count (* width height depth))))
-                (loop
-                   for d in datalist
-                   for i from 0
-                   do (setf (mem-aref res element-type i)
-                            d))
+                      (foreign-alloc element-type :count (* width height depth)))
+                     (i 0))
+                (map nil (lambda (d)
+                           (setf (mem-aref res element-type (1- (incf i)))
+                                 d))
+                     dataseq)
                 res))
          (ewl (if event-wait-list
                   (let ((res (foreign-alloc 'cl-event :count

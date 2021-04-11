@@ -32,12 +32,20 @@ void hello(__global uint* n,
                               :type :uint
                               :data (list njobs)))
            (outbuf
-            (cl-create-buffer context
-                              +CL-MEM-READ-WRITE+
-                              :size
-                              (* njobs
-                                 (foreign-type-size
-                                  :uint))))
+            ;; Manual size calculation:
+            ;; 
+            ;; (cl-create-buffer context
+            ;;                   +CL-MEM-READ-WRITE+
+            ;;                   :size
+            ;;                   (* njobs
+            ;;                      (foreign-type-size
+            ;;                       :uint)))
+
+            ;; More convenient automatic size calculation:
+             (cl-create-buffer context
+                               +CL-MEM-READ-WRITE+
+                               :count njobs
+                               :type :uint))
            (queue
             (cl-create-command-queue context dev))
            (nwork
