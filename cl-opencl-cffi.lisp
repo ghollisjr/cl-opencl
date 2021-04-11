@@ -25,7 +25,7 @@
 ;; Device APIs
 (defcfun "clGetDeviceIDs" cl-int
   (platform cl-platform-id)
-  (platform-type :int)
+  (device-type cl-device-type)
   (num-entries cl-uint)
   (devices :pointer)
   (ndevices :pointer))

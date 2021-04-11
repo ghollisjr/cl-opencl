@@ -80,14 +80,14 @@ statement."
       (foreign-string-to-lisp pp))))
 
 ;; Device API
-(defun cl-get-device-ids (platform-id platform-type)
+(defun cl-get-device-ids (platform-id device-type)
   (with-foreign-object (ndevices :uint)
-    (clgetdeviceids platform-id platform-type 0 +NULL+ ndevices)
+    (clgetdeviceids platform-id device-type 0 +NULL+ ndevices)
     (let* ((nplats (mem-ref ndevices :uint)))
       (with-foreign-object (device-ids 'cl-device-id nplats)
         (check-opencl-error () ()
           (clgetdeviceids platform-id
-                          platform-type
+                          device-type
                           (mem-ref ndevices :uint)
                           device-ids
                           cl-opencl-cffi:+NULL+))

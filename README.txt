@@ -44,12 +44,13 @@ EXAMPLES:
 
 The examples.lisp file contains a number of examples, including a
 Mandelbrot fractal PNM image generator.  Here's a trivial example that
-sets the indices of an array using an OpenCL kernel.
+sets the indices of an array using an OpenCL kernel on the first
+available OpenCL device.
 
 (defun hello-opencl ()
   "Demonstrate OpenCL API"
   (let* ((plat (first (cl-get-platform-ids)))
-         (dev (first (cl-get-device-ids plat +CL-DEVICE-TYPE-GPU+)))
+         (dev (first (cl-get-device-ids plat +CL-DEVICE-TYPE-ALL+)))
          (context
           (cl-create-context plat (list dev)))
          (program

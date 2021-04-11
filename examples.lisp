@@ -5,7 +5,7 @@
 (defun hello-opencl ()
   "Demonstrate OpenCL API"
   (let* ((plat (first (cl-get-platform-ids)))
-         (dev (first (cl-get-device-ids plat +CL-DEVICE-TYPE-GPU+)))
+         (dev (first (cl-get-device-ids plat +CL-DEVICE-TYPE-ALL+)))
          (context
           (cl-create-context plat (list dev)))
          (program
