@@ -1,5 +1,11 @@
 (in-package :cl-opencl-cffi)
 
+(define-foreign-library opencl
+  (:unix "libOpenCL.so")
+  (t (:default "libOpenCL")))
+
+(use-foreign-library opencl)
+
 (progn
   (defctype cl-char :char)
   (defctype cl-uchar :uchar)
