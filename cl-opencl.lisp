@@ -371,30 +371,36 @@ In all cases, a list of device IDs will be returned."
                             callback
                             user-data
                             properties)
-  "Creates context from platform and list of devices.  Currently
-properties isn't used as OpenCL does not support any properties aside
-from the platform ID already specified as another argument, but it's
-kept here for future purposes.
+  "Creates context from platform and list of devices.  The platform
+  will be automatically added to the properties list.  properties can
+  be a list of (PROPCODE1 value1 PROPCODE2 value2 ...).
 
 callback must be a function pointer, e.g. (callback somefunction)."
-  (declare (ignore properties)) ; up to OpenCL 2.2 at least
-  (let* ((ndevices (length devices)))
+  ;; (declare (ignore properties)) ; up to OpenCL 2.2 at least
+  (let* ((ndevices (length devices))
+         (nprops (length properties)))
     (with-foreign-objects ((devices-pointer 'cl-device-id ndevices)
-                           (props 'cl-context-properties 3))
+                           (props 'cl-context-properties (+ 3 (* 2 nprops))))
       (loop
          for i from 0
          for did in devices
          do (setf (mem-aref devices-pointer 'cl-device-id i)
                   did))
-      (setf (mem-aref props 'cl-context-properties
-                      0)
-            +CL-CONTEXT-PLATFORM+)
-      (setf (mem-aref props 'cl-context-properties
-                      1)
-            platform)
-      (setf (mem-aref props 'cl-context-properties
-                      2)
-            0)
+      (let* ((index 0))
+        (loop
+           for p in properties
+           do (setf (mem-aref props 'cl-context-properties
+                              (1- (incf index)))
+                    p))
+        (setf (mem-aref props 'cl-context-properties
+                        (1- (incf index)))
+              +CL-CONTEXT-PLATFORM+)
+        (setf (mem-aref props 'cl-context-properties
+                        (1- (incf index)))
+              platform)
+        (setf (mem-aref props 'cl-context-properties
+                        (1- (incf index)))
+              0))
       (check-opencl-error err ()
         (CLCREATECONTEXT props 1 devices-pointer
                          (if callback
