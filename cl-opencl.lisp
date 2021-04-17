@@ -569,7 +569,7 @@ cl-create-command-queue."
 
 For size-based, either set size to the number of bytes to allocate in
 the buffer, or set type and count to match the number of elements
-available in the buffer of a given type.  Note that data is ignored
+available in the buffer of a given type.  Note that count is ignored
 when size or count are specified as it will be calculated when data is
 supplied.  To partially fill space with data, create the buffer and
 then write to the buffer as separate queue commands.
@@ -983,7 +983,7 @@ list of source strings."
       (let* ((result
               (check-opencl-error err ()
                 (clCreateProgramWithSource context
-                                           1
+                                           nsources
                                            strings-ptr
                                            +NULL+
                                            err))))
