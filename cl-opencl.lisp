@@ -368,19 +368,25 @@ In all cases, a list of device IDs will be returned."
 ;; Context API
 (defun cl-create-context (platform devices
                           &key
+                            (add-platform-p T)
                             callback
                             user-data
                             properties)
   "Creates context from platform and list of devices.  The platform
-  will be automatically added to the properties list.  properties can
-  be a list of (PROPCODE1 value1 PROPCODE2 value2 ...).
+  will be automatically added to the properties list if add-platform-p
+  is non-NIL.  properties can be a list of (PROPCODE1 value1 PROPCODE2
+  value2 ...).
 
 callback must be a function pointer, e.g. (callback somefunction)."
   ;; (declare (ignore properties)) ; up to OpenCL 2.2 at least
   (let* ((ndevices (length devices))
          (nprops (length properties)))
     (with-foreign-objects ((devices-pointer 'cl-device-id ndevices)
-                           (props 'cl-context-properties (+ 3 (* 2 nprops))))
+                           (props 'cl-context-properties (+ 1
+                                                            (if add-platform-p
+                                                                2
+                                                                0)
+                                                            (* 2 nprops))))
       (loop
          for i from 0
          for did in devices
@@ -392,12 +398,13 @@ callback must be a function pointer, e.g. (callback somefunction)."
            do (setf (mem-aref props 'cl-context-properties
                               (1- (incf index)))
                     p))
-        (setf (mem-aref props 'cl-context-properties
-                        (1- (incf index)))
-              +CL-CONTEXT-PLATFORM+)
-        (setf (mem-aref props 'cl-context-properties
-                        (1- (incf index)))
-              platform)
+        (when add-platform-p
+          (setf (mem-aref props 'cl-context-properties
+                          (1- (incf index)))
+                +CL-CONTEXT-PLATFORM+)
+          (setf (mem-aref props 'cl-context-properties
+                          (1- (incf index)))
+                platform))
         (setf (mem-aref props 'cl-context-properties
                         (1- (incf index)))
               0))
@@ -1691,23 +1698,42 @@ reasonable values per param value.
 
 ;; Event Object APIs
 (defun cl-wait-for-events (events)
-  "Waits for events and returns input event list for possible
-release."
+  "Waits for events and returns input event list for possible release.
+If an event is actually a list (event cleanup), then the cleanup will
+not be called but will still be passed along to output."
   (let* ((n (length events)))
     (with-foreign-object (evs 'cl-event n)
       (loop
          for i below n
          for ev in events
-         do (setf (mem-ref evs 'cl-event i)
-                  ev))
+         do (if (atom ev)
+                (setf (mem-aref evs 'cl-event i)
+                      ev)
+                (destructuring-bind (event cleanup) ev
+                  ;; (declare (ignore cleanup))
+                  (setf (mem-aref evs 'cl-event i)
+                        event))))
+      ;; debug
+      ;; (loop
+      ;;    for i below n
+      ;;    do (format t "~a~%"
+      ;;               (mem-aref 
+      ;; end debug
       (check-opencl-error () ()
         (clWaitForEvents n
                          evs))
       events)))
 
 (defun cl-wait-and-release-events (events)
-  "Waits for and releases events once they have completed."
-  (mapcar #'cl-release-event
+  "Waits for and releases events once they have completed.  If value
+is a list, it is assumed to be a list of at least (event cleanup),
+with possible later elements of the list."
+  (mapcar (lambda (x)
+            (if (atom x)
+                (cl-release-event x)
+                (destructuring-bind (event cleanup) x
+                  (funcall cleanup)
+                  (cl-release-event event))))
           (cl-wait-for-events events)))
 
 (defun cl-get-event-info (event param)
@@ -3779,3 +3805,136 @@ marker unless event-p is NIL."
                 (mem-ref event 'cl-event))))
         (cleanup)
         result))))
+
+;; OpenGL interaction
+(defun cl-create-from-GL-buffer (context flags gl-buf)
+  "Returns OpenCL buffer handle to OpenGL buffer object."
+  (let* ((flags (join-flags flags)))
+    (check-opencl-error err ()
+      (clCreateFromGLBuffer context flags gl-buf err))))
+
+(defun cl-create-from-GL-texture (context flags target gl-texture
+                                  &key
+                                    (miplevel 0))
+  "Returns OpenCL image handle to OpenGL texture object.  target must
+be an OpenGL target code."
+  (let* ((flags (join-flags flags)))
+    (check-opencl-error err ()
+      (clCreateFromGLTexture context flags target
+                             miplevel gl-texture
+                             err))))
+                                    
+(defun cl-create-from-GL-renderbuffer (context flags renderbuffer)
+  "Returns OpenCL image handle to an OpenGL renderbuffer."
+  (check-opencl-error err ()
+    (clCreateFromGLRenderbuffer context
+                                (join-flags flags)
+                                renderbuffer
+                                err)))
+
+(defun cl-get-GL-object-info (obj)
+  "Returns a list (gl-type gl-id) for the OpenCL object obj."
+  (with-foreign-objects ((type 'cl-gl-object-type)
+                         (handle 'cl-gluint))
+    (check-opencl-error () ()
+      (clGetGLObjectInfo obj type handle))
+    (list (mem-ref type 'cl-gl-object-type)
+          (mem-ref handle 'cl-gluint))))
+
+(defun cl-get-GL-texture-info (image param)
+  "param can take the following values:
+
++CL-GL-TEXTURE-TARGET+
++CL-GL-MIPMAP-LEVEL+"
+  (with-foreign-object (size 'size-t)
+    (check-opencl-error () ()
+      (clGetGLTextureInfo image param 0 +NULL+ size))
+    (with-foreign-object (result :uchar (mem-ref size 'size-t))
+      (check-opencl-error () ()
+        (clGetGLTextureInfo image param
+                            (mem-ref size 'size-t)
+                            result
+                            +NULL+))
+      (case= param
+        (+CL-GL-TEXTURE-TARGET+
+         (mem-ref result 'cl-glenum))
+        (+CL-GL-MIPMAP-LEVEL+
+         (mem-ref result 'cl-glint))))))
+
+(defun cl-enqueue-acquire-GL-objects (queue cl-gl-mem-handles
+                                      &key
+                                        event-wait-list)
+  "Enqueues actual acquisition of OpenGL objects."
+  (let* ((n (length cl-gl-mem-handles))
+         (ewl
+          (if event-wait-list
+              (let* ((res
+                      (foreign-alloc 'cl-event
+                                     :count (length event-wait-list))))
+                (loop
+                   for ev in event-wait-list
+                   for i from 0
+                   do (setf (mem-aref ev 'cl-event i)
+                            ev))
+                res)
+              +NULL+)))
+    (labels ((cleanup ()
+               (when event-wait-list
+                 (foreign-free ewl))))
+      (with-foreign-object (ptr 'cl-mem n)
+        (loop
+           for i from 0
+           for x in cl-gl-mem-handles
+           do (setf (mem-aref ptr 'cl-mem i)
+                    x))
+        (with-foreign-object (event 'cl-event)
+          (check-opencl-error () #'cleanup
+            (clEnqueueAcquireGLObjects queue
+                                       n
+                                       ptr
+                                       (if event-wait-list
+                                           (length event-wait-list)
+                                           0)
+                                       ewl
+                                       event))
+          (cleanup)
+          (mem-ref event 'cl-event))))))
+
+(defun cl-enqueue-release-GL-objects (queue cl-gl-mem-handles
+                                      &key
+                                        event-wait-list)
+  "Enqueues release of previously acquired OpenGL objects."
+  (let* ((n (length cl-gl-mem-handles))
+         (ewl
+          (if event-wait-list
+              (let* ((res
+                      (foreign-alloc 'cl-event
+                                     :count (length event-wait-list))))
+                (loop
+                   for ev in event-wait-list
+                   for i from 0
+                   do (setf (mem-aref ev 'cl-event i)
+                            ev))
+                res)
+              +NULL+)))
+    (labels ((cleanup ()
+               (when event-wait-list
+                 (foreign-free ewl))))
+      (with-foreign-object (ptr 'cl-mem n)
+        (loop
+           for i from 0
+           for x in cl-gl-mem-handles
+           do (setf (mem-aref ptr 'cl-mem i)
+                    x))
+        (with-foreign-object (event 'cl-event)
+          (check-opencl-error () #'cleanup
+            (clEnqueueReleaseGLObjects queue
+                                       n
+                                       ptr
+                                       (if event-wait-list
+                                           (length event-wait-list)
+                                           0)
+                                       ewl
+                                       event))
+          (cleanup)
+          (mem-ref event 'cl-event))))))

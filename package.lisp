@@ -1017,6 +1017,13 @@
    :cl-enqueue-ndrange-kernel
    :cl-enqueue-marker
    :cl-enqueue-barrier
+   :cl-create-from-GL-buffer
+   :cl-create-from-GL-texture
+   :cl-create-from-GL-renderbuffer
+   :cl-get-GL-object-info
+   :cl-get-GL-texture-info
+   :cl-enqueue-acquire-GL-objects
+   :cl-enqueue-release-GL-objects
    ;; types
    :CL-CHAR
    :CL-UCHAR
