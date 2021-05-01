@@ -1,5 +1,13 @@
 (in-package :cl-opencl)
 
+;; memory management utilities
+(defun zero-mem (ptr type)
+  "Zeroes data at ptr of type"
+  (loop
+     for i below (foreign-type-size type)
+     do (setf (mem-aref ptr :uchar i)
+              0)))
+
 ;; utility macros
 (defmacro check-opencl-error (err cleanup &body body)
   "Macro for automating error management with two modes:
@@ -563,8 +571,9 @@ cl-create-command-queue."
       flags
       (apply #'logior flags)))
 
-(defun cl-create-buffer (context flags
+(defun cl-create-buffer (context
                          &key
+                           (flags +CL-MEM-READ-WRITE+)
                            size
                            type
                            count
@@ -583,7 +592,9 @@ then write to the buffer as separate queue commands.
 
 For data-based, set type and data to the foreign type and a list of
 data to place into the buffer.  Note that this means initializing the
-buffer with data requires the data-based option.
+buffer with data requires the data-based option.  Also note that
++CL-MEM-COPY-HOST-PTR+ will automatically be set when data is
+supplied.
 
 Only one of these should be used, and the size-based mode takes
 precedence.  If neither are used, then an error is thrown.
@@ -595,6 +606,9 @@ integer."
                  (and type data)))
     (error "Must set either size, type and count, or type and data to non-NIL values."))
   (let* ((mode (join-flags flags)))
+    (when data
+      (setf mode
+            (logior mode +CL-MEM-COPY-HOST-PTR+)))
     (if (or size count)
         (let* ((size (if size
                          size
@@ -622,10 +636,13 @@ integer."
                               buf
                               err)))))))
 
-(defun cl-create-sub-buffer (buffer flags origin size)
+(defun cl-create-sub-buffer (buffer origin size
+                             &key
+                               (flags +CL-MEM-READ-WRITE+))
   (let* ((bufcreatetype +CL-BUFFER-CREATE-TYPE-REGION+)
          (flags (join-flags flags)))
     (with-foreign-object (bufinfo '(:struct cl-buffer-region))
+      (zero-mem bufinfo '(:struct cl-buffer-region))
       (setf (foreign-slot-value bufinfo '(:struct cl-buffer-region)
                                 :origin)
             origin)
@@ -671,8 +688,9 @@ integer."
     (+CL-FLOAT+
      :float)))
 
-(defun cl-create-image (context flags
+(defun cl-create-image (context
                         &key
+                          (flags +CL-MEM-READ-WRITE+)
                           (image-type +CL-MEM-OBJECT-IMAGE2D+)
                           (image-channel-order +CL-RGBA+)
                           (image-channel-data-type +CL-UNSIGNED-INT8+)
@@ -683,11 +701,15 @@ integer."
                           (row-pitch 0)
                           (slice-pitch 0)
                           data
-                          buffer)
+                          ;; buffer
+                          )
   (let* ((flags (join-flags flags))
          (num-mip-levels 0)
          (num-samples 0))
+    ;; (when data
+    ;;   (setf flags (logior flags +CL-MEM-COPY-HOST-PTR+)))
     (with-foreign-object (format '(:struct cl-image-format))
+      (zero-mem format '(:struct cl-image-format))
       (setf (foreign-slot-value format '(:struct cl-image-format)
                                 :image-channel-order)
             image-channel-order)
@@ -696,6 +718,7 @@ integer."
 
             image-channel-data-type)
       (with-foreign-object (desc '(:struct cl-image-desc))
+        (zero-mem desc '(:struct cl-image-desc))
         (setf (foreign-slot-value desc '(:struct cl-image-desc)
                                   :image-type)
               image-type)
@@ -723,10 +746,10 @@ integer."
         (setf (foreign-slot-value desc '(:struct cl-image-desc)
                                   :num-samples)
               num-samples)
-        (when buffer
-          (setf (foreign-slot-value desc '(:struct cl-image-desc)
-                                    :buffer)
-                buffer))
+        ;; (when buffer
+        ;;   (setf (foreign-slot-value desc '(:struct cl-image-desc)
+        ;;                             :buffer)
+        ;;         buffer))
         (if data
             (let* ((ndata (length data))
                    (data-type (image-channel-type->data-type
@@ -744,7 +767,9 @@ integer."
               (clCreateImage context flags format desc
                              +NULL+ err)))))))
 
-(defun cl-create-pipe (context flags packet-size max-packets)
+(defun cl-create-pipe (context packet-size max-packets
+                       &key
+                         (flags +CL-MEM-READ-WRITE+))
   (let* ((properties +NULL+)) ; as of OpenCL 2.0
     (check-opencl-error err ()
       (clCreatePipe context
@@ -1446,7 +1471,8 @@ foreign type.  Size is determined by the type and count unless size is
 explicitly specified.  Note that count only has meaning when value is
 not supplied and therefore only matters when allocating local memory
 as a kernel argument."
-  (when (not (or value size))
+  (when (or (not type)
+            (not (or value size count)))
     (error "Must set value or size in cl-set-kernel-arg"))
   (let* ((size (if size
                    size
@@ -1727,13 +1753,17 @@ not be called but will still be passed along to output."
 (defun cl-wait-and-release-events (events)
   "Waits for and releases events once they have completed.  If value
 is a list, it is assumed to be a list of at least (event cleanup),
-with possible later elements of the list."
+with possible later elements of the list.  If a cleanup function is
+detected, then the return value for that entry will be the return
+value of the cleanup.  This is useful for cleanup functions which also
+return an enqueued read or other result."
   (mapcar (lambda (x)
             (if (atom x)
                 (cl-release-event x)
                 (destructuring-bind (event cleanup) x
-                  (funcall cleanup)
-                  (cl-release-event event))))
+                  (let* ((result (funcall cleanup)))
+                    (cl-release-event event)
+                    result))))
           (cl-wait-for-events events)))
 
 (defun cl-get-event-info (event param)
@@ -3807,14 +3837,17 @@ marker unless event-p is NIL."
         result))))
 
 ;; OpenGL interaction
-(defun cl-create-from-GL-buffer (context flags gl-buf)
+(defun cl-create-from-GL-buffer (context gl-buf
+                                 &key
+                                   (flags +CL-MEM-READ-WRITE+))
   "Returns OpenCL buffer handle to OpenGL buffer object."
   (let* ((flags (join-flags flags)))
     (check-opencl-error err ()
       (clCreateFromGLBuffer context flags gl-buf err))))
 
-(defun cl-create-from-GL-texture (context flags target gl-texture
+(defun cl-create-from-GL-texture (context target gl-texture
                                   &key
+                                    (flags +CL-MEM-READ-WRITE+)
                                     (miplevel 0))
   "Returns OpenCL image handle to OpenGL texture object.  target must
 be an OpenGL target code."
@@ -3824,7 +3857,9 @@ be an OpenGL target code."
                              miplevel gl-texture
                              err))))
                                     
-(defun cl-create-from-GL-renderbuffer (context flags renderbuffer)
+(defun cl-create-from-GL-renderbuffer (context renderbuffer
+                                       &key
+                                         (flags +CL-MEM-READ-WRITE+))
   "Returns OpenCL image handle to an OpenGL renderbuffer."
   (check-opencl-error err ()
     (clCreateFromGLRenderbuffer context

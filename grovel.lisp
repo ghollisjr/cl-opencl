@@ -115,7 +115,8 @@
          (:image-slice-pitch "image_slice_pitch" :type size-t)
          (:num-mip-levels "num_mip_levels" :type cl-uint)
          (:num-samples "num_samples" :type cl-uint)
-         (:buffer "buffer" :type cl-mem))
+         ;; (:buffer "buffer" :type cl-mem)
+         )
 
 (cstruct cl-buffer-region "cl_buffer_region"
          (:origin "origin" :type size-t)

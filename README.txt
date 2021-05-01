@@ -69,6 +69,11 @@ void hello(__global uint* n,
             (cl-create-kernel program "hello"))
            (nbuf
             (cl-create-buffer context
+                              ;; Note that +CL-MEM-COPY-HOST-PTR+ is
+                              ;; automatically enabled when data is
+                              ;; supplied, but there's no harm in
+                              ;; adding it to flags explicitly
+                              :flags
                               (list +CL-MEM-READ-WRITE+
                                     +CL-MEM-COPY-HOST-PTR+)
                               :type :uint
@@ -77,6 +82,7 @@ void hello(__global uint* n,
             ;; Manual size calculation:
             ;; 
             ;; (cl-create-buffer context
+            ;;                   :flags
             ;;                   +CL-MEM-READ-WRITE+
             ;;                   :size
             ;;                   (* njobs
@@ -85,6 +91,7 @@ void hello(__global uint* n,
 
             ;; More convenient automatic size calculation:
              (cl-create-buffer context
+                               :flags
                                +CL-MEM-READ-WRITE+
                                :count njobs
                                :type :uint))

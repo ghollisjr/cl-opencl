@@ -130,8 +130,7 @@ void mandelbrot(__global float* boundaries,
             (cl-create-kernel program "mandelbrot"))
            (boundaries
             (cl-create-buffer context
-                              (list +CL-MEM-READ-ONLY+
-                                    +CL-MEM-COPY-HOST-PTR+)
+                              :flags +CL-MEM-READ-ONLY+
                               :type :float
                               :data (list (car xrange)
                                           (cdr xrange)
@@ -139,19 +138,18 @@ void mandelbrot(__global float* boundaries,
                                           (cdr yrange))))
            (grid
             (cl-create-buffer context
-                              (list +CL-MEM-READ-ONLY+
-                                    +CL-MEM-COPY-HOST-PTR+)
+                              :flags +CL-MEM-READ-ONLY+
                               :type :uint
                               :data (list width
                                           height)))
            (niter
             (cl-create-buffer context
-                              (list +CL-MEM-READ-ONLY+
-                                    +CL-MEM-COPY-HOST-PTR+)
+                              :flags +CL-MEM-READ-ONLY+
                               :type :uint
                               :data (list max-iterations)))
            (image
-            (cl-create-image context +CL-MEM-WRITE-ONLY+
+            (cl-create-image context
+                             :flags +CL-MEM-WRITE-ONLY+
                              :image-channel-data-type +CL-UNSIGNED-INT16+
                              :width width
                              :height height)))
