@@ -980,16 +980,16 @@
 
 (ctype cl-queue-properties-khr
        "cl_queue_properties_khr")
-(ctype cl-mem-migration-flags-ext
-       "cl_mem_migration_flags_ext")
+;; (ctype cl-mem-migration-flags-ext
+;;        "cl_mem_migration_flags_ext")
 (ctype cl-image-pitch-info-qcom
        "cl_image_pitch_info_qcom")
 (ctype cl-queue-priority-khr
        "cl_queue_priority_khr")
 (ctype cl-queue-throttle-khr
        "cl_queue_throttle_khr")
-(ctype cl-version-khr
-       "cl_version_khr")
+;; (ctype cl-version-khr
+;;        "cl_version_khr")
 (ctype cl-import-properties-arm
        "cl_import_properties_arm")
 (ctype cl-svm-mem-flags-arm
@@ -1013,17 +1013,17 @@
          (:ion-hostptr "ion_hostptr"
                        :type :pointer))
 
-(cstruct cl-mem-android-native-buffer-host-ptr
-         "cl_mem_android_native_buffer_host_ptr"
-         (:ext-host-ptr "ext_host_ptr"
-                        :type cl-mem-ext-host-ptr)
-         (:anb-ptr "anb_ptr"
-                   :type :pointer))
+;; (cstruct cl-mem-android-native-buffer-host-ptr
+;;          "cl_mem_android_native_buffer_host_ptr"
+;;          (:ext-host-ptr "ext_host_ptr"
+;;                         :type cl-mem-ext-host-ptr)
+;;          (:anb-ptr "anb_ptr"
+;;                    :type :pointer))
 
-(cstruct cl-name-version-khr
-         "cl_name_version_khr"
-         (:version "version"
-                   :type cl-version-khr)
-         (:name "name"
-                :type :char
-                :count "CL_NAME_VERSION_MAX_NAME_SIZE_KHR"))
+;; (cstruct cl-name-version-khr
+;;          "cl_name_version_khr"
+;;          (:version "version"
+;;                    :type cl-version-khr)
+;;          (:name "name"
+;;                 :type :char
+;;                 :count "CL_NAME_VERSION_MAX_NAME_SIZE_KHR"))
