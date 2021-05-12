@@ -10,4 +10,5 @@
    (:file "base-types")
    (:cffi-grovel-file "grovel")
    (:file "cl-opencl-cffi")
-   (:file "cl-opencl")))
+   (:file "cl-opencl")
+   (:file "utils")))

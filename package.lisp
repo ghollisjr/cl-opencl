@@ -1787,4 +1787,8 @@
    :+CL-DEVICE-COMPUTE-UNITS-BITFIELD-ARM+
    :+CL-ARM-JOB-SLOT-SELECTION+
    :+CL-DEVICE-JOB-SLOTS-ARM+
-   :+CL-QUEUE-JOB-SLOT-ARM+))
+   :+CL-QUEUE-JOB-SLOT-ARM+
+   ;; Utilities
+   :describe-opencl-platforms
+   :describe-opencl-devices
+   ))
