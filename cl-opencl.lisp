@@ -288,7 +288,7 @@ statement."
          (mem-ref p 'cl-uint))
         ((= param +CL-DEVICE-SVM-CAPABILITIES+)
          (mem-ref p 'cl-device-svm-capabilities))
-        
+
         ((= param +CL-DEVICE-NAME+)
          (foreign-string-to-lisp p))
         ((= param +CL-DEVICE-PLATFORM+)
@@ -1831,7 +1831,7 @@ not be called but will still be passed along to output."
       ;; (loop
       ;;    for i below n
       ;;    do (format t "~a~%"
-      ;;               (mem-aref 
+      ;;               (mem-aref
       ;; end debug
       (check-opencl-error () ()
         (clWaitForEvents n
@@ -1940,18 +1940,20 @@ return an enqueued read or other result."
     (clFinish queue)))
 
 ;; Enqueued Commands APIs
-(defun cl-enqueue-read-buffer (queue buffer array-type
+(defun cl-enqueue-read-buffer (queue buffer type count
                                &key
                                  (offset 0)
                                  make-array-args
                                  event-wait-list
                                  blocking-p)
-  "Enqueues reading from a buffer in the command queue.  array-type
-should be a CFFI array type denoting how the foreign array data is
-stored, i.e. (:array element-type dim1-size dim2-size ...).
-make-array-args will be passed to cffi:foreign-array-to-lisp along
-with the read data and the array-type.  There are 2 main modes of
-operation:
+  "Enqueues reading from a buffer in the command queue.  type should
+be the foreign type stored in the buffer, and count can either be the
+number of elements to read or a list of dimensions of the array to
+read.  They will be used to construct a CFFI array type denoting how
+the foreign array data is stored, i.e. (:array element-type count)
+or (:array element-type . count).  make-array-args will be passed to
+cffi:foreign-array-to-lisp along with the read data and the
+array-type.  There are 2 main modes of operation:
 
 blocking-p NIL: Asynchronous read.  cl-enqueue-read-buffer will
 return a list with two elements: An event handle and a function that
@@ -1972,78 +1974,82 @@ NOTE: Do not throw away the buffer read function for asynchronous
 mode, as there is no reasonable way to avoid a memory leak.  Even with
 finalization, the OpenCL queue would need to be blocked by the
 finalizer to avoid a segfault."
-  (destructuring-bind (type &rest dims) (rest array-type)
-    (let* ((size (apply #'*
-                        (foreign-type-size type)
-                        dims))
-           (ptr (foreign-alloc type :count size))
-           (ewl (if event-wait-list
-                    (let* ((res
-                            (foreign-array-alloc (coerce event-wait-list 'array)
-                                                 (list :array 'cl-event
-                                                       (length event-wait-list)))))
-                      (loop
-                         for x in event-wait-list
-                         for i from 0
-                         do (setf (mem-aref res 'cl-event i)
-                                  x))
-                      res)
-                    +NULL+)))
-      (labels ((cleanupptr ()
-                 (foreign-free ptr))
-               (cleanupewl ()
-                 (when event-wait-list
-                   (foreign-free ewl)))
-               (cleanup ()
-                 (cleanupptr)
-                 (cleanupewl)))
-        (with-foreign-object (event 'cl-event)
-          (if blocking-p
-              (progn
-                (check-opencl-error () #'cleanup
-                  (clEnqueueReadBuffer queue
-                                       buffer
-                                       +CL-TRUE+
-                                       offset
-                                       size
-                                       ptr
-                                       (if event-wait-list
-                                           (length event-wait-list)
-                                           0)
-                                       ewl
-                                       ;; no need to use event handle
-                                       +NULL+))
-                (let* ((result (apply #'foreign-array-to-lisp
-                                      ptr
-                                      array-type
-                                      make-array-args)))
-                  (cleanup)
-                  result))
-              (progn
-                (check-opencl-error () #'cleanup
-                  (clEnqueueReadBuffer queue
-                                       buffer
-                                       +CL-FALSE+
-                                       offset
-                                       size
-                                       ptr
-                                       (if event-wait-list
-                                           (length event-wait-list)
-                                           0)
-                                       ewl
-                                       event))
-                (cleanupewl)
-                (list (mem-ref event 'cl-event)
-                      (lambda ()
-                        (let* ((result (apply #'foreign-array-to-lisp
-                                              ptr
-                                              array-type
-                                              make-array-args)))
-                          (cleanupptr)
-                          result))))))))))
+  (let* ((array-type (if (atom count)
+                         (list :array type count)
+                         (append (list :array type)
+                                 count))))
+    (destructuring-bind (type &rest dims) (rest array-type)
+      (let* ((size (apply #'*
+                          (foreign-type-size type)
+                          dims))
+             (ptr (foreign-alloc type :count size))
+             (ewl (if event-wait-list
+                      (let* ((res
+                              (foreign-array-alloc (coerce event-wait-list 'array)
+                                                   (list :array 'cl-event
+                                                         (length event-wait-list)))))
+                        (loop
+                           for x in event-wait-list
+                           for i from 0
+                           do (setf (mem-aref res 'cl-event i)
+                                    x))
+                        res)
+                      +NULL+)))
+        (labels ((cleanupptr ()
+                   (foreign-free ptr))
+                 (cleanupewl ()
+                   (when event-wait-list
+                     (foreign-free ewl)))
+                 (cleanup ()
+                   (cleanupptr)
+                   (cleanupewl)))
+          (with-foreign-object (event 'cl-event)
+            (if blocking-p
+                (progn
+                  (check-opencl-error () #'cleanup
+                    (clEnqueueReadBuffer queue
+                                         buffer
+                                         +CL-TRUE+
+                                         offset
+                                         size
+                                         ptr
+                                         (if event-wait-list
+                                             (length event-wait-list)
+                                             0)
+                                         ewl
+                                         ;; no need to use event handle
+                                         +NULL+))
+                  (let* ((result (apply #'foreign-array-to-lisp
+                                        ptr
+                                        array-type
+                                        make-array-args)))
+                    (cleanup)
+                    result))
+                (progn
+                  (check-opencl-error () #'cleanup
+                    (clEnqueueReadBuffer queue
+                                         buffer
+                                         +CL-FALSE+
+                                         offset
+                                         size
+                                         ptr
+                                         (if event-wait-list
+                                             (length event-wait-list)
+                                             0)
+                                         ewl
+                                         event))
+                  (cleanupewl)
+                  (list (mem-ref event 'cl-event)
+                        (lambda ()
+                          (let* ((result (apply #'foreign-array-to-lisp
+                                                ptr
+                                                array-type
+                                                make-array-args)))
+                            (cleanupptr)
+                            result)))))))))))
 
 (defun cl-enqueue-read-buffer-rect
-    (queue buffer array-type
+    (queue buffer type count
      &key
        (width 1)
        (height 1)
@@ -2055,11 +2061,14 @@ finalizer to avoid a segfault."
        event-wait-list
        blocking-p)
   "Enqueues rectangular reading from a buffer in the command queue.
-array-type should be a CFFI array type denoting how the foreign array
-data is stored, i.e. (:array element-type dim1-size dim2-size ...).
-make-array-args will be passed to cffi:foreign-array-to-lisp along
-with the read data and the array-type.  There are 2 main modes of
-operation:
+type should be the foreign type used to stored the data in the buffer,
+and count can either be the number of elements to read or the
+dimensions of an array to read from the buffer.  They will be used to
+create a CFFI array type denoting how the foreign array data is
+stored, i.e. (:array element-type count) or (:array element-type
+. count).  make-array-args will be passed to
+cffi:foreign-array-to-lisp along with the read data and the
+array-type.  There are 2 main modes of operation:
 
 blocking-p NIL: Asynchronous read.  cl-enqueue-read-buffer will
 return a list with two elements: An event handle and a function that
@@ -2086,109 +2095,113 @@ NOTE: Do not throw away the buffer read function for asynchronous
 mode, as there is no reasonable way to avoid a memory leak.  Even with
 finalization, the OpenCL queue would need to be blocked by the
 finalizer to avoid a segfault."
-  (destructuring-bind (type &rest dims) (rest array-type)
-    (let* ((element-size (foreign-type-size type))
-           (size (apply #'*
-                        (foreign-type-size type)
-                        dims))
-           (ptr (foreign-alloc type :count size))
-           (ewl (if event-wait-list
-                    (let* ((res
-                            (foreign-array-alloc (coerce event-wait-list 'array)
-                                                 (list :array 'cl-event
-                                                       (length event-wait-list)))))
-                      (loop
-                         for x in event-wait-list
-                         for i from 0
-                         do (setf (mem-aref res 'cl-event i)
-                                  x))
-                      res)
-                    +NULL+)))
-      (with-foreign-objects ((region 'size-t 3)
-                             (buffer-origin-ptr 'size-t 3)
-                             (host-origin-ptr 'size-t 3))
-        (loop
-           for i below 2
-           do (setf (mem-aref host-origin-ptr 'size-t i)
-                    0))
-        (if buffer-origin
-            (loop
-               for x in buffer-origin
-               for i from 0
-               do (setf (mem-aref buffer-origin-ptr 'size-t i)
-                        x))
-            (loop
-               for i below 2
-               do (setf (mem-aref buffer-origin-ptr 'size-t i)
-                        0)))
-        (setf (mem-aref region 'size-t 0)
-              (* element-size width))
-        (setf (mem-aref region 'size-t 1)
-              height)
-        (setf (mem-aref region 'size-t 2)
-              depth)
-        (labels ((cleanupptr ()
-                   (foreign-free ptr))
-                 (cleanupewl ()
-                   (when event-wait-list
-                     (foreign-free ewl)))
-                 (cleanup ()
-                   (cleanupptr)
-                   (cleanupewl)))
-          (with-foreign-object (event 'cl-event)
-            (if blocking-p
-                (progn
-                  (check-opencl-error () #'cleanup
-                    (clEnqueueReadBufferRect queue
-                                             buffer
-                                             +CL-TRUE+
-                                             buffer-origin-ptr
-                                             host-origin-ptr
-                                             region
-                                             buffer-row-pitch
-                                             buffer-slice-pitch
-                                             0
-                                             0
-                                             ptr
-                                             (if event-wait-list
-                                                 (length event-wait-list)
-                                                 0)
-                                             ewl
-                                             ;; no need to use event handle
-                                             +NULL+))
-                  (let* ((result (apply #'foreign-array-to-lisp
-                                        ptr
-                                        array-type
-                                        make-array-args)))
-                    (cleanup)
-                    result))
-                (progn
-                  (check-opencl-error () #'cleanup
-                    (clEnqueueReadBufferRect queue
-                                             buffer
-                                             +CL-FALSE+
-                                             buffer-origin-ptr
-                                             host-origin-ptr
-                                             region
-                                             buffer-row-pitch
-                                             buffer-slice-pitch
-                                             0
-                                             0
-                                             ptr
-                                             (if event-wait-list
-                                                 (length event-wait-list)
-                                                 0)
-                                             ewl
-                                             event))
-                  (cleanupewl)
-                  (list (mem-ref event 'cl-event)
-                        (lambda ()
-                          (let* ((result (apply #'foreign-array-to-lisp
-                                                ptr
-                                                array-type
-                                                make-array-args)))
-                            (cleanupptr)
-                            result)))))))))))
+  (let* ((array-type (if (atom count)
+                         (list :array type count)
+                         (append (list :array type)
+                                 count))))
+    (destructuring-bind (type &rest dims) (rest array-type)
+      (let* ((element-size (foreign-type-size type))
+             (size (apply #'*
+                          (foreign-type-size type)
+                          dims))
+             (ptr (foreign-alloc type :count size))
+             (ewl (if event-wait-list
+                      (let* ((res
+                              (foreign-array-alloc (coerce event-wait-list 'array)
+                                                   (list :array 'cl-event
+                                                         (length event-wait-list)))))
+                        (loop
+                           for x in event-wait-list
+                           for i from 0
+                           do (setf (mem-aref res 'cl-event i)
+                                    x))
+                        res)
+                      +NULL+)))
+        (with-foreign-objects ((region 'size-t 3)
+                               (buffer-origin-ptr 'size-t 3)
+                               (host-origin-ptr 'size-t 3))
+          (loop
+             for i below 2
+             do (setf (mem-aref host-origin-ptr 'size-t i)
+                      0))
+          (if buffer-origin
+              (loop
+                 for x in buffer-origin
+                 for i from 0
+                 do (setf (mem-aref buffer-origin-ptr 'size-t i)
+                          x))
+              (loop
+                 for i below 2
+                 do (setf (mem-aref buffer-origin-ptr 'size-t i)
+                          0)))
+          (setf (mem-aref region 'size-t 0)
+                (* element-size width))
+          (setf (mem-aref region 'size-t 1)
+                height)
+          (setf (mem-aref region 'size-t 2)
+                depth)
+          (labels ((cleanupptr ()
+                     (foreign-free ptr))
+                   (cleanupewl ()
+                     (when event-wait-list
+                       (foreign-free ewl)))
+                   (cleanup ()
+                     (cleanupptr)
+                     (cleanupewl)))
+            (with-foreign-object (event 'cl-event)
+              (if blocking-p
+                  (progn
+                    (check-opencl-error () #'cleanup
+                      (clEnqueueReadBufferRect queue
+                                               buffer
+                                               +CL-TRUE+
+                                               buffer-origin-ptr
+                                               host-origin-ptr
+                                               region
+                                               buffer-row-pitch
+                                               buffer-slice-pitch
+                                               0
+                                               0
+                                               ptr
+                                               (if event-wait-list
+                                                   (length event-wait-list)
+                                                   0)
+                                               ewl
+                                               ;; no need to use event handle
+                                               +NULL+))
+                    (let* ((result (apply #'foreign-array-to-lisp
+                                          ptr
+                                          array-type
+                                          make-array-args)))
+                      (cleanup)
+                      result))
+                  (progn
+                    (check-opencl-error () #'cleanup
+                      (clEnqueueReadBufferRect queue
+                                               buffer
+                                               +CL-FALSE+
+                                               buffer-origin-ptr
+                                               host-origin-ptr
+                                               region
+                                               buffer-row-pitch
+                                               buffer-slice-pitch
+                                               0
+                                               0
+                                               ptr
+                                               (if event-wait-list
+                                                   (length event-wait-list)
+                                                   0)
+                                               ewl
+                                               event))
+                    (cleanupewl)
+                    (list (mem-ref event 'cl-event)
+                          (lambda ()
+                            (let* ((result (apply #'foreign-array-to-lisp
+                                                  ptr
+                                                  array-type
+                                                  make-array-args)))
+                              (cleanupptr)
+                              result))))))))))))
 
 (defun cl-enqueue-write-buffer (queue buffer element-type data
                                 &key
@@ -3944,7 +3957,7 @@ be an OpenGL target code."
       (clCreateFromGLTexture context flags target
                              miplevel gl-texture
                              err))))
-                                    
+
 (defun cl-create-from-GL-renderbuffer (context renderbuffer
                                        &key
                                          (flags +CL-MEM-READ-WRITE+))

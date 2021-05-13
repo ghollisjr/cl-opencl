@@ -68,7 +68,7 @@ void hello(__global uint* n,
                                    (list nwork))))
       (let* ((result
               (cl-enqueue-read-buffer queue outbuf
-                                      (list :array :uint njobs)
+                                      :uint njobs
                                       :blocking-p t)))
         (cl-release-kernel kernel)
         (cl-release-program program)
