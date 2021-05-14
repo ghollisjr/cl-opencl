@@ -240,3 +240,56 @@ included in the alist."
                   appending
                     (handler-case (list (cons sym (cl-get-device-info did val)))
                       (error () NIL)))))))
+
+;; Get 1-D global and local space size given a kernel, device, and
+;; Number of jobs desired for computation
+(defun get-opencl-kernel-work-size (kernel device njobs)
+  "Returns a list (nglobal nlocal) for the global work size and local
+work size suitable for the kernel.  Note that this enforces nglobal
+being an integer multiple of nlocal, so there is some possible
+inefficiency and you will need to ensure that your kernel knows how
+many submitted jobs actually need to be run."
+  (let* ((nwork (cl-get-kernel-work-group-info
+                 kernel device
+                 +CL-KERNEL-WORK-GROUP-SIZE+))
+         (nglobal (* nwork
+                     (ceiling njobs nwork))))
+    (list nglobal nwork)))
+
+;; Enqueue kernel using automatically-determined global and local work
+;; size using the number of jobs to execute.
+(defun cl-enqueue-kernel (queue kernel
+                          njobs
+                          &key
+                            global-work-offset
+                            event-wait-list)
+  (let* ((dev (cl-get-command-queue-info
+               queue +CL-QUEUE-DEVICE+)))
+    (destructuring-bind (nglobal nwork)
+        (get-opencl-kernel-work-size kernel dev njobs)
+      (cl-enqueue-ndrange-kernel queue kernel
+                                 (list nglobal)
+                                 (list nwork)
+                                 :global-work-offset global-work-offset
+                                 :event-wait-list event-wait-list))))
+
+;; Print build error log in case of error:
+(defun cl-build-program-with-log (program devices
+                                  &key
+                                    notify-fn
+                                    options
+                                    user-data)
+  (handler-case (cl-build-program program devices
+                                  :notify-fn notify-fn
+                                  :options options
+                                  :user-data user-data)
+    (error (err)
+      (loop
+         for dev in devices
+         do (format t "Build error log device ~a:~%Source:~%~a~%Log:~%~a~%"
+                    dev
+                    (cl-opencl:cl-get-program-info program +CL-PROGRAM-SOURCE+)
+                    (cl-opencl:cl-get-program-build-info
+                     program dev
+                     cl-opencl:+CL-PROGRAM-BUILD-LOG+)))
+      (error err))))
