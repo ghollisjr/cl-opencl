@@ -27,15 +27,21 @@ The Lisp wrapper does not support functions marked as deprecated, but
 those deprecated functions have almost always been effectively
 included in the Lisp API due to flexible keyword arguments.
 
-The OpenCL C kernel language is still used for program source code, in
-contrast with oclcl.  It would be possible to combine this project
-with oclcl's functionality and have the best of both worlds, so that
-you could both use a Lisp-like kernel language as well as have a Lisp
-wrapper that automatically converts between foreign and Lisp data.
+NOTE: The cl-opencl-utils library located at
+
+https://www.github.com/ghollisjr/cl-opencl-utils
+
+provides a Lispified OpenCL C language with automatic function and
+kernel definition management, whereas cl-opencl by itself just uses
+strings containing OpenCL C kernel language code.  cl-opencl-utils
+also provides utilities for map-reduce algorithms and convolutions,
+for example.
 
 The OpenGL and Direct3D intercommunication libraries are hoped to be
 included in the Lisp wrapper.  It would be nice to make cl-opencl work
-well with cl-opengl as found in Quicklisp.
+well with cl-opengl as found in Quicklisp.  At the moment, I've had
+success integrated very basic private OpenGL CFFI Lisp libraries with
+cl-opencl.
 
 EXAMPLES:
 
