@@ -40,7 +40,7 @@ for example.
 The OpenGL and Direct3D intercommunication libraries are hoped to be
 included in the Lisp wrapper.  It would be nice to make cl-opencl work
 well with cl-opengl as found in Quicklisp.  At the moment, I've had
-success integrated very basic private OpenGL CFFI Lisp libraries with
+success integrating very basic private OpenGL CFFI Lisp libraries with
 cl-opencl.
 
 EXAMPLES:
