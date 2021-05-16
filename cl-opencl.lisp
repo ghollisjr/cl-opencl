@@ -1985,7 +1985,7 @@ finalizer to avoid a segfault."
              (ptr (foreign-alloc type :count size))
              (ewl (if event-wait-list
                       (let* ((res
-                              (foreign-array-alloc (coerce event-wait-list 'array)
+                              (foreign-array-alloc (coerce event-wait-list 'vector)
                                                    (list :array 'cl-event
                                                          (length event-wait-list)))))
                         (loop
@@ -2107,7 +2107,7 @@ finalizer to avoid a segfault."
              (ptr (foreign-alloc type :count size))
              (ewl (if event-wait-list
                       (let* ((res
-                              (foreign-array-alloc (coerce event-wait-list 'array)
+                              (foreign-array-alloc (coerce event-wait-list 'vector)
                                                    (list :array 'cl-event
                                                          (length event-wait-list)))))
                         (loop
@@ -2233,7 +2233,7 @@ write should occur."
          (ewl
           (if event-wait-list
               (let* ((res
-                      (foreign-array-alloc (coerce event-wait-list 'array)
+                      (foreign-array-alloc (coerce event-wait-list 'vector)
                                            (list :array 'cl-event
                                                  (length event-wait-list)))))
                 (loop
@@ -2522,7 +2522,7 @@ event has completed."
          (ewl
           (if event-wait-list
               (let* ((res
-                      (foreign-array-alloc (coerce event-wait-list 'array)
+                      (foreign-array-alloc (coerce event-wait-list 'vector)
                                            (list :array 'cl-event
                                                  (length event-wait-list)))))
                 (loop
