@@ -126,6 +126,16 @@ void hello(__global uint* n,
         (cl-release-context context)
         result))))
 
+To make understanding your specific platform easier, you can use the
+following functions:
+
+(describe-opencl-platforms) ==> a list of alists with all properties available
+for all platforms
+
+(describe-opencl-devices platform device-type) ==> a list of alists
+with all properties available for all devices matching the type and
+platform.
+
 IMPLEMENTATION DETAILS:
 
 * The vector types are implemented as unions with anonymous structs in
