@@ -1793,4 +1793,6 @@
    :describe-opencl-devices
    :get-opencl-kernel-work-size
    :cl-enqueue-kernel
-   :cl-build-program-with-log))
+   :cl-build-program-with-log
+   :with-opencl-context
+   :with-opencl-command-queue))

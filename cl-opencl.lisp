@@ -550,17 +550,27 @@ ID."
   (check-opencl-error () ()
     (CLRETAINCONTEXT context)))
 
-(defmacro with-opencl-context (context platform devices
+(defmacro with-opencl-context ((var platform devices
+                                    &key
+                                    (add-platform-p T)
+                                    callback
+                                    user-data
+                                    properties)
                                &body body)
-  "Macro to automate OpenCL context creation and release."
-  (let* ((retval (gensym)))
-    `(let* ((,context
-             (cl-create-context ,platform ,devices))
-            (,retval
-             (progn
-               ,@body)))
-       (cl-release-context ,context)
-       ,retval)))
+  "Sets var to an OpenCL context that is released after use."
+  (let* ((result (gensym "RESULT")))
+    `(let* ((,var (cl-create-context
+                   ,platform ,devices
+                   :add-platform-p ,add-platform-p
+                   ,@(when callback
+                       `(:callback ,callback))
+                   ,@(when user-data
+                       `(:user-data ,user-data))
+                   ,@(when properties
+                       `(:properties ,properties))))
+            (,result (progn ,@body)))
+       (cl-release-context ,var)
+       ,result)))
 
 ;; Queue API
 (defun cl-create-command-queue (context device
@@ -628,29 +638,23 @@ constants as parsed by the groveler."
                                +NULL+))
       (mem-ref result type))))
 
-(defmacro with-opencl-command-queue (context device qvar &body body)
-  "Macro to automate queue creation and release.  If qvar is a symbol,
-then default properties will be used.  If it is list (qvar &key
-queue-size properties), then the key args will be supplied to
-cl-create-command-queue."
-  (let* ((ctext (gensym))
-         (dev (gensym))
-         (retval (gensym))
-         (queue nil)
-         (key-args nil))
-    (if (symbolp qvar)
-        (setf queue qvar)
-        (progn
-          (setf queue (first qvar))
-          (setf key-args (rest qvar))))
-    `(let* ((,ctext ,context)
-            (,dev ,device)
-            (,queue (cl-create-command-queue ,ctext ,dev
-                                             ,@key-args))
+(defmacro with-opencl-command-queue ((var context device
+                                          &key
+                                          queue-size
+                                          properties)
+                                     &body body)
+  "Macro to automate queue creation and release."
+  (let* ((retval (gensym "RETVAL")))
+    `(let* ((,var (cl-create-command-queue
+                   ,context ,device
+                   ,@(when queue-size
+                       `(:queue-size ,queue-size))
+                   ,@(when properties
+                       `(:properties ,properties))))
             (,retval
              (progn
                ,@body)))
-       (cl-release-command-queue ,queue)
+       (cl-release-command-queue ,var)
        ,retval)))
 
 ;; Memory Object APIs
