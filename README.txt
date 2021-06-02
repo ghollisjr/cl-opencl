@@ -68,8 +68,8 @@ void hello(__global uint* n,
     buf[gid] = gid;
   }
 }")))
-    (cl-build-program program (list dev)
-                      :options "-cl-kernel-arg-info")
+    (cl-build-program-with-log program (list dev)
+                               :options "-cl-kernel-arg-info")
     (let* ((njobs 100)
            (kernel
             (cl-create-kernel program "hello"))
