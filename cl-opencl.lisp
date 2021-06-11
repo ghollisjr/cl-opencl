@@ -1842,6 +1842,15 @@ not be called but will still be passed along to output."
                          evs))
       events)))
 
+(defun release-opencl-event (event)
+  "Handles release for event or (event cleanup) input."
+  (if (atom event)
+      (cl-release-event event)
+      (destructuring-bind (ev cleanup) event
+        (let* ((result (funcall cleanup)))
+          (cl-release-event ev)
+          result))))
+
 (defun cl-wait-and-release-events (events)
   "Waits for and releases events once they have completed.  If value
 is a list, it is assumed to be a list of at least (event cleanup),
@@ -1849,13 +1858,7 @@ with possible later elements of the list.  If a cleanup function is
 detected, then the return value for that entry will be the return
 value of the cleanup.  This is useful for cleanup functions which also
 return an enqueued read or other result."
-  (mapcar (lambda (x)
-            (if (atom x)
-                (cl-release-event x)
-                (destructuring-bind (event cleanup) x
-                  (let* ((result (funcall cleanup)))
-                    (cl-release-event event)
-                    result))))
+  (mapcar #'release-opencl-event
           (cl-wait-for-events events)))
 
 (defun cl-get-event-info (event param)
