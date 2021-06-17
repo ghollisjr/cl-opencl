@@ -248,13 +248,15 @@ included in the alist."
 work size suitable for the kernel.  Note that this enforces nglobal
 being an integer multiple of nlocal, so there is some possible
 inefficiency and you will need to ensure that your kernel knows how
-many submitted jobs actually need to be run."
+many submitted jobs actually need to be run.  If nglobal is less than
+the recommended local work size, then only nglobal jobs will be
+enqueued."
   (let* ((nwork (cl-get-kernel-work-group-info
                  kernel device
                  +CL-KERNEL-WORK-GROUP-SIZE+))
          (nglobal (* nwork
                      (ceiling njobs nwork))))
-    (list nglobal nwork)))
+    (list nglobal (min nglobal nwork))))
 
 ;; Enqueue kernel using automatically-determined global and local work
 ;; size using the number of jobs to execute.
