@@ -8,6 +8,19 @@
      do (setf (mem-aref ptr :uchar i)
               0)))
 
+;; event wait list utility
+(defun event-wait-list->foreign (ewl)
+  (let* ((n (length ewl))
+         (ptr (foreign-alloc 'cl-event :count n)))
+    (loop
+       for i below n
+       for e in ewl
+       do (setf (mem-aref ptr 'cl-event i)
+                (if (listp e)
+                    (first e)
+                    e)))
+    ptr))
+
 ;; utility macros
 (defmacro check-opencl-error (err cleanup &body body)
   "Macro for automating error management with two modes:
@@ -611,7 +624,7 @@ constants as parsed by the groveler."
           (check-opencl-error err ()
             (clCreateCommandQueueWithProperties context
                                                 device
-                                                properties
+                                                props
                                                 err))))))
 
 (defun cl-retain-command-queue (queue)
@@ -1991,16 +2004,7 @@ finalizer to avoid a segfault."
                           dims))
              (ptr (foreign-alloc type :count size))
              (ewl (if event-wait-list
-                      (let* ((res
-                              (foreign-array-alloc (coerce event-wait-list 'vector)
-                                                   (list :array 'cl-event
-                                                         (length event-wait-list)))))
-                        (loop
-                           for x in event-wait-list
-                           for i from 0
-                           do (setf (mem-aref res 'cl-event i)
-                                    x))
-                        res)
+                      (event-wait-list->foreign event-wait-list)
                       +NULL+)))
         (labels ((cleanupptr ()
                    (foreign-free ptr))
@@ -2113,16 +2117,7 @@ finalizer to avoid a segfault."
                           dims))
              (ptr (foreign-alloc type :count size))
              (ewl (if event-wait-list
-                      (let* ((res
-                              (foreign-array-alloc (coerce event-wait-list 'vector)
-                                                   (list :array 'cl-event
-                                                         (length event-wait-list)))))
-                        (loop
-                           for x in event-wait-list
-                           for i from 0
-                           do (setf (mem-aref res 'cl-event i)
-                                    x))
-                        res)
+                      (event-wait-list->foreign event-wait-list)
                       +NULL+)))
         (with-foreign-objects ((region 'size-t 3)
                                (buffer-origin-ptr 'size-t 3)
@@ -2239,16 +2234,7 @@ write should occur."
          (ptr (foreign-alloc element-type :count n))
          (ewl
           (if event-wait-list
-              (let* ((res
-                      (foreign-array-alloc (coerce event-wait-list 'vector)
-                                           (list :array 'cl-event
-                                                 (length event-wait-list)))))
-                (loop
-                   for x in event-wait-list
-                   for i from 0
-                   do (setf (mem-aref res 'cl-event i)
-                            x))
-                res)
+              (event-wait-list->foreign event-wait-list)
               +NULL+)))
     (let ((index 0))
       (map nil (lambda (d)
@@ -2425,14 +2411,7 @@ bytes, which is computed from element-type."
                      dataseq)
                 res))
          (ewl (if event-wait-list
-                  (let ((res (foreign-alloc 'cl-event :count
-                                            (length event-wait-list))))
-                    (loop
-                       for ev in event-wait-list
-                       for i from 0
-                       do (setf (mem-aref res 'cl-event i)
-                                ev))
-                    res)
+                  (event-wait-list->foreign event-wait-list)
                   +NULL+))
          (buffer-origin-ptr
           (let* ((res (foreign-alloc 'size-t :count 3)))
@@ -2528,16 +2507,7 @@ event has completed."
          (ptr (foreign-alloc :uchar :count n))
          (ewl
           (if event-wait-list
-              (let* ((res
-                      (foreign-array-alloc (coerce event-wait-list 'vector)
-                                           (list :array 'cl-event
-                                                 (length event-wait-list)))))
-                (loop
-                   for x in event-wait-list
-                   for i from 0
-                   do (setf (mem-aref res 'cl-event i)
-                            x))
-                res)
+              (event-wait-list->foreign event-wait-list)
               +NULL+)))
     (loop
        for d in byte-pattern
@@ -2577,14 +2547,7 @@ event has completed."
   "Enqueues copy from src-buffer to dst-buffer.  Return value is a an
 event for copy completion."
   (let* ((ewl (if event-wait-list
-                  (let* ((res
-                          (foreign-alloc 'cl-event :count (length event-wait-list))))
-                    (loop
-                       for ev in event-wait-list
-                       for i from 0
-                       do (setf (mem-ref res 'cl-event i)
-                                ev))
-                    res)
+                  (event-wait-list->foreign event-wait-list)
                   +NULL+)))
     (labels ((cleanup ()
                (when event-wait-list
@@ -2629,14 +2592,7 @@ width in bytes, while height and depth are the number of rows and
 slices respectively.  The product (* width height depth) will be the
 total amount of data copied."
   (let* ((ewl (if event-wait-list
-                  (let* ((res
-                          (foreign-alloc 'cl-event :count (length event-wait-list))))
-                    (loop
-                       for ev in event-wait-list
-                       for i from 0
-                       do (setf (mem-ref res 'cl-event i)
-                                ev))
-                    res)
+                  (event-wait-list->foreign event-wait-list)
                   +NULL+))
          (src-origin-ptr (let* ((res
                                  (foreign-alloc 'size-t :count 3)))
@@ -2857,15 +2813,7 @@ entire image."
            (total-size (* element-size height width depth))
            (ptr (foreign-alloc :uchar :count total-size))
            (ewl (if event-wait-list
-                    (let* ((res
-                            (foreign-alloc 'cl-event
-                                           :count (length event-wait-list))))
-                      (loop
-                         for ev in event-wait-list
-                         for i from 0
-                         do (setf (mem-aref res 'cl-event i)
-                                  ev))
-                      res)
+                    (event-wait-list->foreign event-wait-list)
                     +NULL+)))
       (labels ((cleanuptmp ()
                  (when event-wait-list
@@ -3020,15 +2968,7 @@ entire image."
            (total-size (* element-size height width depth))
            (ptr (foreign-alloc :uchar :count total-size))
            (ewl (if event-wait-list
-                    (let* ((res
-                            (foreign-alloc 'cl-event
-                                           :count (length event-wait-list))))
-                      (loop
-                         for ev in event-wait-list
-                         for i from 0
-                         do (setf (mem-aref res 'cl-event i)
-                                  ev))
-                      res)
+                    (event-wait-list->foreign event-wait-list)
                     +NULL+)))
       (labels ((cleanuptmp ()
                  (when event-wait-list
@@ -3240,15 +3180,7 @@ entire image."
            ;; technically sometimes too big
            (ptr (foreign-alloc :uchar :count (* 4 (foreign-type-size :float))))
            (ewl (if event-wait-list
-                    (let* ((res
-                            (foreign-alloc 'cl-event
-                                           :count (length event-wait-list))))
-                      (loop
-                         for ev in event-wait-list
-                         for i from 0
-                         do (setf (mem-aref res 'cl-event i)
-                                  ev))
-                      res)
+                    (event-wait-list->foreign event-wait-list)
                     +NULL+)))
       (labels ((cleanuptmp ()
                  (when event-wait-list
@@ -3346,15 +3278,7 @@ dependent on."
                                      x))
                          res))
            (ewl (if event-wait-list
-                    (let* ((res
-                            (foreign-alloc 'cl-event
-                                           :count (length event-wait-list))))
-                      (loop
-                         for ev in event-wait-list
-                         for i from 0
-                         do (setf (mem-aref res 'cl-event i)
-                                  ev))
-                      res)
+                    (event-wait-list->foreign event-wait-list)
                     +NULL+)))
       (labels ((cleanup ()
                  (when event-wait-list
@@ -3433,15 +3357,7 @@ dependent on."
                                      x))
                          res))
            (ewl (if event-wait-list
-                    (let* ((res
-                            (foreign-alloc 'cl-event
-                                           :count (length event-wait-list))))
-                      (loop
-                         for ev in event-wait-list
-                         for i from 0
-                         do (setf (mem-aref res 'cl-event i)
-                                  ev))
-                      res)
+                    (event-wait-list->foreign event-wait-list)
                     +NULL+)))
       (labels ((cleanup ()
                  (when event-wait-list
@@ -3519,15 +3435,7 @@ dependent on."
                                      x))
                          res))
            (ewl (if event-wait-list
-                    (let* ((res
-                            (foreign-alloc 'cl-event
-                                           :count (length event-wait-list))))
-                      (loop
-                         for ev in event-wait-list
-                         for i from 0
-                         do (setf (mem-aref res 'cl-event i)
-                                  ev))
-                      res)
+                    (event-wait-list->foreign event-wait-list)
                     +NULL+)))
       (labels ((cleanup ()
                  (when event-wait-list
@@ -3556,15 +3464,7 @@ dependent on."
                                 (offset 0)
                                 event-wait-list)
   (let* ((ewl (if event-wait-list
-                  (let* ((res
-                          (foreign-alloc 'cl-event
-                                         :count (length event-wait-list))))
-                    (loop
-                       for ev in event-wait-list
-                       for i from 0
-                       do (setf (mem-aref res 'cl-event i)
-                                ev))
-                    res)
+                  (event-wait-list->foreign event-wait-list)
                   +NULL+)))
     (labels ((cleanup ()
                (when event-wait-list
@@ -3665,15 +3565,7 @@ dependent on."
                                      x))
                          res))
            (ewl (if event-wait-list
-                    (let* ((res
-                            (foreign-alloc 'cl-event
-                                           :count (length event-wait-list))))
-                      (loop
-                         for ev in event-wait-list
-                         for i from 0
-                         do (setf (mem-aref res 'cl-event i)
-                                  ev))
-                      res)
+                    (event-wait-list->foreign event-wait-list)
                     +NULL+)))
       (labels ((cleanup ()
                  (when event-wait-list
@@ -3734,7 +3626,7 @@ dependent on."
   "Enqueues unmapping obj which was mapped to map-ptr.  Asynchronous
 operation only.  Return value is an event for operation completion."
   (let* ((ewl (if event-wait-list
-                  (foreign-alloc 'cl-event :count (length event-wait-list))
+                  (event-wait-list->foreign event-wait-list)
                   +NULL+)))
     (labels ((cleanup ()
                (when event-wait-list
@@ -3759,7 +3651,7 @@ operation only.  Return value is an event for operation completion."
 the supplied command queue.  Return value is an event for command
 completion."
   (let* ((ewl (if event-wait-list
-                  (foreign-alloc 'cl-event :count (length event-wait-list))
+                  (event-wait-list->foreign event-wait-list)
                   +NULL+)))
     (with-foreign-object (objects-ptr 'cl-mem (length objects))
       (loop
@@ -3800,7 +3692,7 @@ of each thread.
 Return value is an event for kernel execution completion."
   (let* ((ndims (length global-work-size))
          (ewl (if event-wait-list
-                  (foreign-alloc 'cl-event :count (length event-wait-list))
+                  (event-wait-list->foreign event-wait-list)
                   +NULL+))
          (global-work-size-ptr
           (let* ((res
@@ -3874,15 +3766,7 @@ marker unless event-p is NIL."
                     +NULL+))
          (ewl
           (if event-wait-list
-              (let* ((res
-                      (foreign-alloc 'cl-event
-                                     :count (length event-wait-list))))
-                (loop
-                   for ev in event-wait-list
-                   for i from 0
-                   do (setf (mem-aref ev 'cl-event i)
-                            ev))
-                res)
+              (event-wait-list->foreign event-wait-list)
               +NULL+)))
     (labels ((cleanup ()
                (when event-p
@@ -3916,15 +3800,7 @@ marker unless event-p is NIL."
                     +NULL+))
          (ewl
           (if event-wait-list
-              (let* ((res
-                      (foreign-alloc 'cl-event
-                                     :count (length event-wait-list))))
-                (loop
-                   for ev in event-wait-list
-                   for i from 0
-                   do (setf (mem-aref ev 'cl-event i)
-                            ev))
-                res)
+              (event-wait-list->foreign event-wait-list)
               +NULL+)))
     (labels ((cleanup ()
                (when event-p
@@ -4011,15 +3887,7 @@ be an OpenGL target code."
   (let* ((n (length cl-gl-mem-handles))
          (ewl
           (if event-wait-list
-              (let* ((res
-                      (foreign-alloc 'cl-event
-                                     :count (length event-wait-list))))
-                (loop
-                   for ev in event-wait-list
-                   for i from 0
-                   do (setf (mem-aref ev 'cl-event i)
-                            ev))
-                res)
+              (event-wait-list->foreign event-wait-list)
               +NULL+)))
     (labels ((cleanup ()
                (when event-wait-list
@@ -4050,15 +3918,7 @@ be an OpenGL target code."
   (let* ((n (length cl-gl-mem-handles))
          (ewl
           (if event-wait-list
-              (let* ((res
-                      (foreign-alloc 'cl-event
-                                     :count (length event-wait-list))))
-                (loop
-                   for ev in event-wait-list
-                   for i from 0
-                   do (setf (mem-aref ev 'cl-event i)
-                            ev))
-                res)
+              (event-wait-list->foreign event-wait-list)
               +NULL+)))
     (labels ((cleanup ()
                (when event-wait-list
