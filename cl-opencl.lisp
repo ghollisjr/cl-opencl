@@ -695,9 +695,9 @@ when size or count are specified as it will be calculated when data is
 supplied.  To partially fill space with data, create the buffer and
 then write to the buffer as separate queue commands.
 
-For data-based, set type and data to the foreign type and a list of
-data to place into the buffer.  Note that this means initializing the
-buffer with data requires the data-based option.  Also note that
+For data-based, set type and data to the foreign type and a sequence
+of data to place into the buffer.  Note that this means initializing
+the buffer with data requires the data-based option.  Also note that
 +CL-MEM-COPY-HOST-PTR+ will automatically be set when data is
 supplied.
 
@@ -729,11 +729,13 @@ integer."
                (size (* (foreign-type-size type)
                         ndata)))
           (with-foreign-object (buf type ndata)
-            (loop
-               for i below ndata
-               for d in data
-               do (setf (mem-aref buf type i)
-                        d))
+            (let* ((i 0))
+              (map NIL
+                   (lambda (d)
+                     (setf (mem-aref buf type i)
+                           d)
+                     (incf i))
+                   data))
             (check-opencl-error err ()
               (clCreateBuffer context
                               mode
@@ -860,11 +862,13 @@ integer."
                    (data-type (image-channel-type->data-type
                                image-channel-data-type)))
               (with-foreign-object (fdata data-type ndata)
-                (loop
-                   for i below ndata
-                   for d in data
-                   do (setf (mem-aref fdata data-type i)
-                            d))
+                (let ((i 0))
+                  (map NIL
+                       (lambda (d)
+                         (setf (mem-aref fdata data-type i)
+                               d)
+                         (incf i))
+                       data))
                 (check-opencl-error err ()
                   (clCreateImage context flags format desc
                                  fdata err))))
