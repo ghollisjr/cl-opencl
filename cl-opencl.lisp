@@ -1864,9 +1864,11 @@ not be called but will still be passed along to output."
   (if (atom event)
       (cl-release-event event)
       (destructuring-bind (ev cleanup) event
-        (let* ((result (funcall cleanup)))
+        (let* ((results
+                (multiple-value-list
+                 (funcall cleanup))))
           (cl-release-event ev)
-          result))))
+          (apply #'values results)))))
 
 (defun cl-wait-and-release-events (events)
   "Waits for and releases events once they have completed.  If value
