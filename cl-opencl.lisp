@@ -1836,28 +1836,29 @@ reasonable values per param value.
   "Waits for events and returns input event list for possible release.
 If an event is actually a list (event cleanup), then the cleanup will
 not be called but will still be passed along to output."
-  (let* ((n (length events)))
-    (with-foreign-object (evs 'cl-event n)
-      (loop
-         for i below n
-         for ev in events
-         do (if (atom ev)
-                (setf (mem-aref evs 'cl-event i)
-                      ev)
-                (destructuring-bind (event cleanup) ev
-                  ;; (declare (ignore cleanup))
+  (when events
+    (let* ((n (length events)))
+      (with-foreign-object (evs 'cl-event n)
+        (loop
+           for i below n
+           for ev in events
+           do (if (atom ev)
                   (setf (mem-aref evs 'cl-event i)
-                        event))))
-      ;; debug
-      ;; (loop
-      ;;    for i below n
-      ;;    do (format t "~a~%"
-      ;;               (mem-aref
-      ;; end debug
-      (check-opencl-error () ()
-        (clWaitForEvents n
-                         evs))
-      events)))
+                        ev)
+                  (destructuring-bind (event cleanup) ev
+                    ;; (declare (ignore cleanup))
+                    (setf (mem-aref evs 'cl-event i)
+                          event))))
+        ;; debug
+        ;; (loop
+        ;;    for i below n
+        ;;    do (format t "~a~%"
+        ;;               (mem-aref
+        ;; end debug
+        (check-opencl-error () ()
+          (clWaitForEvents n
+                           evs))
+        events))))
 
 (defun release-opencl-event (event)
   "Handles release for event or (event cleanup) input."
