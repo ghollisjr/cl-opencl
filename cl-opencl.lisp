@@ -581,9 +581,9 @@ ID."
                        `(:user-data ,user-data))
                    ,@(when properties
                        `(:properties ,properties))))
-            (,result (progn ,@body)))
+            (,result (multiple-value-list (progn ,@body))))
        (cl-release-context ,var)
-       ,result)))
+       (apply #'values ,result))))
 
 ;; Queue API
 (defun cl-create-command-queue (context device
@@ -665,10 +665,11 @@ constants as parsed by the groveler."
                    ,@(when properties
                        `(:properties ,properties))))
             (,retval
-             (progn
-               ,@body)))
+             (multiple-value-list
+              (progn
+                ,@body))))
        (cl-release-command-queue ,var)
-       ,retval)))
+       (apply #'values ,retval))))
 
 ;; Memory Object APIs
 (defun join-flags (flags)
