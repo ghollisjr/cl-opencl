@@ -241,6 +241,19 @@ included in the alist."
                     (handler-case (list (cons sym (cl-get-device-info did val)))
                       (error () NIL)))))))
 
+(defun find-opencl-platform-by-name (name)
+  "Searches for an OpenCL platform by the platform name"
+  (let* ((descriptions (describe-opencl-platforms))
+         (match (find name
+                      descriptions
+                      :key
+                      (lambda (desc)
+                        (cdr (assoc '+CL-PLATFORM-NAME+ desc :test #'eq)))
+                      :test #'equal))
+         (result (when match
+                   (cdr (assoc :platform-id match)))))
+    result))
+
 ;; Get 1-D global and local space size given a kernel, device, and
 ;; Number of jobs desired for computation
 (defun get-opencl-kernel-work-size (kernel device njobs)

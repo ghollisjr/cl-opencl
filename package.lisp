@@ -1791,6 +1791,7 @@
    ;; Utilities
    :describe-opencl-platforms
    :describe-opencl-devices
+   :find-opencl-platform-by-name
    :release-opencl-event
    :get-opencl-kernel-work-size
    :cl-enqueue-kernel
