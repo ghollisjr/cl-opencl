@@ -5,3 +5,13 @@
   - Continue at line 1452 of cl-opencl.lisp, line 361 of cl-opencl-cffi.lisp
   - Continue at line 2090 of cl-opencl.lisp, line 480 of cl-opencl-cffi.lisp
   + Start OpenGL intercommunication
+
++ Add raw foreign memory argument support to memory read/write
+  functions.  Should probably add separate functions,
+  e.g. cl-enqueue-write-buffer-foreign.  The main bottleneck of the
+  current read/write Lisp layer is converting between Lisp and foreign
+  memory.  Many times it is possible to work directly with foreign
+  memory without needing to convert to Lisp, so if this is possible
+  for an application, that application should have access to a Lisp
+  API without the nasty overhead of converting everything to and from
+  foreign memory.
